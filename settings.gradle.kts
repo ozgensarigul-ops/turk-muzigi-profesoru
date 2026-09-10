@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "TM Tuner"
+rootProject.name = "turk-muzigi-profesoru"
 include(":app")
