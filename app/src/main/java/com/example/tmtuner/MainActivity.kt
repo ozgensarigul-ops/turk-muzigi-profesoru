@@ -91,6 +91,9 @@ class TMTunerViewModel : ViewModel() {
     private val _isTransposed = MutableStateFlow(false)
     val isTransposed: StateFlow<Boolean> = _isTransposed.asStateFlow()
 
+    private val _selectedTranspose = MutableStateFlow("Konsert (Do)")
+    val selectedTranspose: StateFlow<String> = _selectedTranspose.asStateFlow()
+
     private val _isDronePlaying = MutableStateFlow(false)
     val isDronePlaying: StateFlow<Boolean> = _isDronePlaying.asStateFlow()
 
@@ -120,6 +123,10 @@ class TMTunerViewModel : ViewModel() {
     fun updateAhenk(newAhenk: String) { _selectedAhenk.value = newAhenk; updateTMNotesMap(); restartAudioIfPlaying() }
     fun updateMakam(newMakam: String) { _selectedMakam.value = newMakam; restartAudioIfPlaying() }
     fun toggleTranspose() { _isTransposed.value = !_isTransposed.value }
+    fun updateTranspose(newTranspose: String) {
+        _selectedTranspose.value = newTranspose
+        _isTransposed.value = (newTranspose != "Konsert (Do)")
+    }
     fun setDroneVolume(vol: Float) { _droneVolume.value = vol }
     fun toggleDrone() { _isDronePlaying.value = !_isDronePlaying.value; if (_isDronePlaying.value) startAudio() else stopAudio() }
     private fun restartAudioIfPlaying() { if (_isDronePlaying.value) { stopAudio(); startAudio() } }
@@ -201,7 +208,11 @@ class TMTunerViewModel : ViewModel() {
                     if (readResult > 0) {
                         val pitch = calculatePitchAutocorrelation(buffer, sampleRate)
                         if (pitch > 50f && pitch < 2000f) {
-                            val adjustedPitch = if (_isTransposed.value) pitch * (9.0/8.0) else pitch.toDouble()
+                            val adjustedPitch = when (_selectedTranspose.value) {
+                                "Tenor / Soprano Saksafon (Bb)" -> pitch * (9.0 / 8.0)
+                                "Alto Saksafon (Eb)" -> pitch * (27.0 / 16.0)
+                                else -> if (_isTransposed.value) pitch * (9.0 / 8.0) else pitch.toDouble()
+                            }
                             _frequency.value = pitch
 
                             val closestNote = currentTMNotes.minByOrNull { abs(it.first - adjustedPitch) }
@@ -303,6 +314,7 @@ fun TunerScreen(viewModel: TMTunerViewModel) {
     val ahenk by viewModel.selectedAhenk.collectAsState()
     val makam by viewModel.selectedMakam.collectAsState()
     val isTransposed by viewModel.isTransposed.collectAsState()
+    val selectedTranspose by viewModel.selectedTranspose.collectAsState()
 
     var isProMode by remember { mutableStateOf(true) }
 
@@ -349,8 +361,8 @@ fun TunerScreen(viewModel: TMTunerViewModel) {
             Text(text = "Koma Değeri: $komaText", fontSize = 18.sp, fontWeight = FontWeight.Medium, color = komaColor, modifier = Modifier.padding(top = 8.dp))
         }
 
-        if (isTransposed) {
-            Text(text = "(Bb Transpoze Açık)", color = Color.Yellow, modifier = Modifier.padding(top = 8.dp))
+        if (selectedTranspose != "Konsert (Do)") {
+            Text(text = "($selectedTranspose Transpoze Açık)", color = Color.Yellow, modifier = Modifier.padding(top = 8.dp))
         }
 
         Spacer(modifier = Modifier.height(48.dp))
@@ -406,17 +418,19 @@ fun TunerScreen(viewModel: TMTunerViewModel) {
 fun MakamScreen(viewModel: TMTunerViewModel) {
     val ahenk by viewModel.selectedAhenk.collectAsState()
     val makam by viewModel.selectedMakam.collectAsState()
-    val isTransposed by viewModel.isTransposed.collectAsState()
+    val selectedTranspose by viewModel.selectedTranspose.collectAsState()
 
     val ahenkList = listOf("Mansur (La=440)", "Kız (La=415)", "Bolahenk (La=586)", "Süpürde (La=523)")
     val makamList = listOf("Rast", "Uşşak", "Nihavend", "Hicaz", "Hüseyni")
+    val transposeList = listOf("Konsert (Do)", "Tenor / Soprano Saksafon (Bb)", "Alto Saksafon (Eb)")
 
     var ahenkExpanded by remember { mutableStateOf(false) }
     var makamExpanded by remember { mutableStateOf(false) }
+    var transposeExpanded by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Text("Ayarlar ve Presetler", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(48.dp))
+        Spacer(modifier = Modifier.height(36.dp))
 
         Text("Ahenk Sistemi", color = Color.Gray)
         Box {
@@ -425,7 +439,7 @@ fun MakamScreen(viewModel: TMTunerViewModel) {
                 ahenkList.forEach { item -> DropdownMenuItem(text = { Text(item) }, onClick = { viewModel.updateAhenk(item); ahenkExpanded = false }) }
             }
         }
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
         Text("Makam", color = Color.Gray)
         Box {
             Button(onClick = { makamExpanded = true }) { Text(text = makam) }
@@ -433,11 +447,12 @@ fun MakamScreen(viewModel: TMTunerViewModel) {
                 makamList.forEach { item -> DropdownMenuItem(text = { Text(item) }, onClick = { viewModel.updateMakam(item); makamExpanded = false }) }
             }
         }
-        Spacer(modifier = Modifier.height(48.dp))
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Tenor Saksafon (Bb) Transpoze", fontSize = 16.sp)
-                Switch(checked = isTransposed, onCheckedChange = { viewModel.toggleTranspose() })
+        Spacer(modifier = Modifier.height(20.dp))
+        Text("Enstrüman Transpozisyonu (Nefesliler)", color = Color.Gray)
+        Box {
+            Button(onClick = { transposeExpanded = true }) { Text(text = selectedTranspose) }
+            DropdownMenu(expanded = transposeExpanded, onDismissRequest = { transposeExpanded = false }) {
+                transposeList.forEach { item -> DropdownMenuItem(text = { Text(item) }, onClick = { viewModel.updateTranspose(item); transposeExpanded = false }) }
             }
         }
     }
