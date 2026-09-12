@@ -54,6 +54,7 @@ class TMTunerViewModel : ViewModel() {
 
     private val _isDronePlaying = MutableStateFlow(false)
     val isDronePlaying: StateFlow<Boolean> = _isDronePlaying.asStateFlow()
+    val isPlaying: StateFlow<Boolean> = _isDronePlaying.asStateFlow()
 
     private val _droneVolume = MutableStateFlow(0.5f)
     val droneVolume: StateFlow<Float> = _droneVolume.asStateFlow()
