@@ -81,7 +81,26 @@ Uygulama, 3 oktav boyunca (Pes / Kaba, Orta / Ana, Tîz / En Tîz) 72'den fazla 
 - **Orta / Ana (Octave 1):** Çârgâh, Nîm Hicâz, Hicâz, Neva, Nîm Hisâr, Hüseynî, Acem, Eviç, Gerdâniye, Şehnâz, Muhayyer, Tîz Segâh, Tîz Bûselik...
 - **Tîz / En Tîz (Octave 2):** Tîz Çârgâh, Tîz Neva, Tîz Hüseynî, Tîz Gerdâniye, Tîz Muhayyer, En Tîz Segâh...
 
-### 4. Geleneksel Ahenk ve Transpozisyon Sistemi
+### 4. SymbTr Açık Kaynak Veri Altyapısı ve 8 Temel Perde Matrisi
+Proje, Kemal Karaosmanoğlu tarafından geliştirilen açık kaynak **SymbTr** veri setindeki perde-sınıfı (pitch-class) haritalamalarını `app/src/main/assets/data/` dizininde JSON formatında barındırır. Türk makam müziği gamının iskeletini oluşturan **8 temel perde** şu standart değerlerle tanımlanmıştır:
+
+| Perde Adı | SymbTr Kodu | Batı Karşılığı | AEU Sembolü | 53-EDO Koma (Çârgâh / Râst) | Cent Değeri | Pisagor Oranı | Mansur Frekansı | Temel Makam Rolü |
+|:---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---|
+| **Râst** | `rast_4` | Sol4 (G4) | **G** | 31 / **0 Koma** | 701.89¢ | $3/2$ | **293.33 Hz** | Rast, Nihavend karar perdesi; Rast ailesi ana referansı |
+| **Dügâh** | `dugah_4` | La4 (A4) | **A** | 40 / **9 Koma** | 905.66¢ | $27/16$ | **330.00 Hz** | Uşşak, Hicaz, Hüseyni, Karcığar karar perdesi |
+| **Segâh** | `segah_4` | Si4 (1 koma bemol) | **B♭₁** | 48 / **17 Koma** | 1086.79¢ | $4096/2187$ | **366.27 Hz** | Segâh, Hüzzam karar perdesi; Uşşak/Hüseyni asma kararı |
+| **Çârgâh** | `cargah_5` | Do5 (C5) | **C** | 0 / **22 Koma** | 0.00¢ / 1200¢ | $2/1$ ($1/1$) | **391.11 Hz** | Çârgâh ve Mahur karar perdesi; Rast dörtlüsü tizi |
+| **Nevâ** | `neva_5` | Re5 (D5) | **D** | 9 / **31 Koma** | 203.77¢ | $9/4$ ($9/8 \times 2$) | **440.00 Hz** | Nevâ kararı; Rast, Uşşak, Hicaz güçlü (dominant) perdesi |
+| **Hüseynî** | `huseyni_5` | Mi5 (E5) | **E** | 18 / **40 Koma** | 407.55¢ | $81/32$ | **495.00 Hz** | Hüseynî makamı güçlü perdesi; Nevâ'ya 9 koma (Tanini) mesafede |
+| **Eviç** | `evic_5` | Fa#5 (1 koma bemol) | **F♯₄** | 26 / **48 Koma** | 588.68¢ | $2048/729$ | **549.66 Hz** | Eviç, Ferahnak, Irak karar/güçlü perdesi; Gerdâniye alt basamağı |
+| **Gerdâniye**| `gerdaniye_5`| Sol5 (G5) | **G'** | 31 / **53 Koma** | 701.89¢ | $3/1$ ($3/2 \times 2$) | **586.66 Hz** | Râst perdesinin tam oktav tizi; tiz seyrin merkez perdesi |
+
+> 📁 **Veri Mimarisi:**
+> - `app/src/main/assets/data/symbtr_perde_tablosu.json`: 53-EDO aralıkları, cent değerleri ve 4 ana ahenk frekansları.
+> - `app/src/main/assets/data/symbtr_makamlar.json`: 12 temel makamın karar, güçlü, yeden, asma karar, çeşni ve koma dizisi tanımları.
+> - `SymbTrRepository.kt`: JSON verilerini parse eden, önbelleğe alan ve akort/analiz motoruna servis eden veri deposu.
+
+### 5. Geleneksel Ahenk ve Transpozisyon Sistemi
 Türk müziği enstrümanları (özellikle Ney, Tanbur, Kemençe, Ud, Kanun) icra edilen ahenge göre farklı frekans referanslarında çalınır. Aynı zamanda Türk makamı icra eden modern nefesli ve orkestra sazları için dinamik perde transpozisyonu uygulanır:
 
 #### 🎵 Geleneksel Ahenk Tablosu
