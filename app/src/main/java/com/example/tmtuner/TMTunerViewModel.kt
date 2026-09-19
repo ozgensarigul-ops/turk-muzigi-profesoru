@@ -7,8 +7,13 @@ import android.media.AudioTrack
 import android.media.MediaRecorder
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.tmtuner.data.ml.MakamClassifier
-import com.example.tmtuner.data.ml.MakamPitchDistributionVector
+import com.example.tmtuner.core.musicology.analysis.MakamClassifierEngine
+import com.example.tmtuner.core.musicology.analysis.PitchHistogram
+import com.example.tmtuner.core.musicology.atlas.AeuScaleAtlas
+import com.example.tmtuner.core.musicology.atlas.PitchMatcher
+import com.example.tmtuner.core.musicology.model.Ahenk
+import com.example.tmtuner.core.musicology.model.PerdeNote
+import com.example.tmtuner.core.musicology.model.TranspositionMode
 import com.example.tmtuner.data.ml.MakamRecognitionResult
 import com.example.tmtuner.data.models.AhenkType
 import kotlinx.coroutines.Dispatchers
@@ -19,9 +24,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.PI
-import kotlin.math.abs
-import kotlin.math.log2
-import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
@@ -75,64 +77,17 @@ class TMTunerViewModel : ViewModel() {
     private val _recognitionResult = MutableStateFlow<MakamRecognitionResult?>(null)
     val recognitionResult: StateFlow<MakamRecognitionResult?> = _recognitionResult.asStateFlow()
 
-    private val pitchHistogram = FloatArray(53)
+    private val pitchHistogramEngine = PitchHistogram()
     private var pitchDetectionCount = 0
+    private var currentPitchAtlas: List<PerdeNote> = emptyList()
 
-    private val referenceTrainingVectors: List<MakamPitchDistributionVector> by lazy {
-        listOf(
-            createVector("rast", "Rast", 0, 9, intArrayOf(0, 9, 17, 22, 31, 40, 48, 53)),
-            createVector("ussak", "Uşşak", 9, 22, intArrayOf(9, 17, 22, 31, 40, 44, 53, 62)),
-            createVector("buselik", "Buselik", 9, 31, intArrayOf(9, 18, 22, 31, 40, 44, 53, 62)),
-            createVector("hicaz", "Hicaz", 9, 22, intArrayOf(9, 14, 26, 31, 40, 44, 53, 62)),
-            createVector("huseyni", "Hüseyni", 9, 31, intArrayOf(9, 17, 22, 31, 40, 48, 53, 62))
-        )
-    }
-
-    private fun createVector(
-        id: String,
-        ad: String,
-        durak: Int,
-        guclu: Int,
-        komaIndices: IntArray
-    ): MakamPitchDistributionVector {
-        val hist = FloatArray(53)
-        for (idx in komaIndices) {
-            hist[idx % 53] += 1.0f
-        }
-        hist[durak % 53] += 3.0f
-        hist[guclu % 53] += 2.0f
-        var sumSquares = 0.0f
-        for (v in hist) sumSquares += v * v
-        val norm = kotlin.math.sqrt(sumSquares)
-        if (norm > 0f) {
-            for (i in hist.indices) hist[i] /= norm
-        }
-        return MakamPitchDistributionVector(
-            makamId = id,
-            makamAdi = ad,
-            ahenk = _selectedAhenk.value,
-            komaHistogram = hist,
-            durakKoma = durak,
-            gucluKoma = guclu,
-            isEbAltoSax = _isEbAltoSax.value
-        )
+    private val referenceTrainingVectors by lazy {
+        MakamClassifierEngine.createDefaultReferenceVectors()
     }
 
     private var audioJob: Job? = null
     private var audioTrack: AudioTrack? = null
     private var recordingJob: Job? = null
-
-    private val aeuRatios = doubleArrayOf(
-        1.0, 256.0/243.0, 2187.0/2048.0, 65536.0/59049.0, 9.0/8.0, 32.0/27.0,
-        19683.0/16384.0, 8192.0/6561.0, 81.0/64.0, 4.0/3.0, 177147.0/131072.0,
-        1024.0/729.0, 729.0/512.0, 262144.0/177147.0, 3.0/2.0, 128.0/81.0,
-        6561.0/4096.0, 32768.0/19683.0, 27.0/16.0, 16.0/9.0, 59049.0/32768.0,
-        4096.0/2187.0, 243.0/128.0, 1048576.0/531441.0
-    )
-
-    private val namesOctave0 = arrayOf("Kaba Çârgâh", "Kaba Nîm Hicâz", "Kaba Hicâz", "Kaba Dik Hicâz", "Yegâh", "Kaba Nîm Hisâr", "Kaba Hisâr", "Kaba Dik Hisâr", "Hüseynî Aşîrân", "Acem Aşîrân", "Dik Acem Aşîrân", "Irak", "Geveşt", "Dik Geveşt", "Rast", "Nîm Zîrgûle", "Zîrgûle", "Dik Zîrgûle", "Dügâh", "Kürdî", "Dik Kürdî", "Segâh", "Bûselik", "Dik Bûselik")
-    private val namesOctave1 = arrayOf("Çârgâh", "Nîm Hicâz", "Hicâz", "Dik Hicâz", "Neva", "Nîm Hisâr", "Hisâr", "Dik Hisâr", "Hüseynî", "Acem", "Dik Acem", "Eviç", "Mahur", "Dik Mahur", "Gerdâniye", "Nîm Şehnâz", "Şehnâz", "Dik Şehnâz", "Muhayyer", "Sünbüle", "Dik Sünbüle", "Tîz Segâh", "Tîz Bûselik", "Tîz Dik Bûselik")
-    private val namesOctave2 = arrayOf("Tîz Çârgâh", "Tîz Nîm Hicâz", "Tîz Hicâz", "Tîz Dik Hicâz", "Tîz Neva", "Tîz Nîm Hisâr", "Tîz Hisâr", "Tîz Dik Hisâr", "Tîz Hüseynî", "Tîz Acem", "Tîz Dik Acem", "Tîz Eviç", "Tîz Mahur", "Tîz Dik Mahur", "Tîz Gerdâniye", "Tîz Nîm Şehnâz", "Tîz Şehnâz", "Tîz Dik Şehnâz", "Tîz Muhayyer", "Tîz Sünbüle", "Tîz Dik Sünbüle", "En Tîz Segâh", "En Tîz Bûselik", "En Tîz Dik Bûselik")
 
     private var currentTMNotes = listOf<Pair<Double, String>>()
 
@@ -161,47 +116,22 @@ class TMTunerViewModel : ViewModel() {
     private fun restartAudioIfPlaying() { if (_isDronePlaying.value) { stopAudio(); startAudio() } }
 
     private fun updateTMNotesMap() {
-        val baseLa = when (_selectedAhenk.value) {
-            AhenkType.BOLAHENK -> 586.0
-            AhenkType.KIZ -> 415.0
-            AhenkType.SUPURDE -> 523.0
-            AhenkType.MANSUR -> 440.0
-        }
-        val kabaCargahFreq = baseLa / 2.25
-        val newNotes = mutableListOf<Pair<Double, String>>()
-        for (o in 0..2) {
-            val names = when(o) { 0 -> namesOctave0; 1 -> namesOctave1; else -> namesOctave2 }
-            val multiplier = 2.0.pow(o)
-            for (i in 0..23) {
-                newNotes.add(Pair(kabaCargahFreq * aeuRatios[i] * multiplier, names[i]))
-            }
-        }
-        currentTMNotes = newNotes
+        val coreAhenk = Ahenk.fromString(_selectedAhenk.value.name)
+        val atlas = AeuScaleAtlas.buildPitchAtlas(coreAhenk)
+        currentPitchAtlas = atlas
+        currentTMNotes = atlas.map { Pair(it.frequency, it.name) }
     }
 
     fun getDroneNoteName(): String {
-        return when (_selectedMakam.value) {
-            "Rast", "Nihavend", "Mahur" -> "Râst Perdesi (Sol)"
-            "Segâh" -> "Segâh Perdesi (Si♭₁)"
-            "Çârgâh" -> "Çârgâh Perdesi (Do)"
-            else -> "Dügâh Perdesi (La)"
-        }
+        val coreAhenk = Ahenk.fromString(_selectedAhenk.value.name)
+        val (name, _) = AeuScaleAtlas.calculateDroneFrequency(_selectedMakam.value, coreAhenk)
+        return name
     }
 
     private fun calculateTargetFrequency(): Double {
-        val baseLa = when (_selectedAhenk.value) {
-            AhenkType.BOLAHENK -> 586.0
-            AhenkType.KIZ -> 415.0
-            AhenkType.SUPURDE -> 523.0
-            AhenkType.MANSUR -> 440.0
-        }
-        val kabaCargahFreq = baseLa / 2.25
-        return when (_selectedMakam.value) {
-            "Rast", "Nihavend", "Mahur" -> kabaCargahFreq * 1.5 // Rast perdesi (293.33 Hz)
-            "Segâh" -> kabaCargahFreq * (4096.0 / 2187.0) // Segâh perdesi (366.27 Hz)
-            "Çârgâh" -> kabaCargahFreq * 2.0 // Çârgâh perdesi (391.11 Hz)
-            else -> kabaCargahFreq * (27.0 / 16.0) // Dügâh perdesi (330.00 Hz)
-        }
+        val coreAhenk = Ahenk.fromString(_selectedAhenk.value.name)
+        val (_, freq) = AeuScaleAtlas.calculateDroneFrequency(_selectedMakam.value, coreAhenk)
+        return freq
     }
 
     private fun startAudio() {
@@ -253,42 +183,41 @@ class TMTunerViewModel : ViewModel() {
                         val pitch = calculatePitchAutocorrelation(buffer, sampleRate)
                         if (pitch > 50f && pitch < 2000f) {
                             val adjustedPitch = when (_selectedTranspose.value) {
-                                "Tenor / Soprano Saksafon (Bb)" -> pitch * (9.0 / 8.0)
-                                "Alto Saksafon (Eb)" -> pitch * (27.0 / 16.0)
-                                else -> if (_isTransposed.value) pitch * (9.0 / 8.0) else pitch.toDouble()
+                                "Tenor / Soprano Saksafon (Bb)" -> TranspositionMode.BB_INSTRUMENTS.toTargetPitch(pitch.toDouble())
+                                "Alto Saksafon (Eb)" -> TranspositionMode.EB_ALTO_SAX.toTargetPitch(pitch.toDouble())
+                                else -> if (_isTransposed.value) TranspositionMode.BB_INSTRUMENTS.toTargetPitch(pitch.toDouble()) else pitch.toDouble()
                             }
                             _frequency.value = pitch
 
-                            val closestNote = currentTMNotes.minByOrNull { abs(it.first - adjustedPitch) }
-                            if (closestNote != null) {
-                                _detectedNote.value = closestNote.second
-                                val cents = (1200.0 * log2(adjustedPitch / closestNote.first)).toFloat()
-                                _centsDifference.value = cents
+                            val match = PitchMatcher.matchPitch(
+                                frequency = adjustedPitch,
+                                atlas = currentPitchAtlas,
+                                segahNuanceOffset = if (_applySegahNuance.value) -1 else 0
+                            )
+                            if (match != null) {
+                                _detectedNote.value = match.matchedNote.name
+                                _centsDifference.value = match.centsOffset
+                                _detectedOctave.value = match.octaveIndex
 
                                 _currentPitch.value = LivePitchData(
                                     frequency = pitch,
-                                    noteName = closestNote.second,
-                                    centsOffset = cents.roundToInt()
+                                    noteName = match.matchedNote.name,
+                                    centsOffset = match.centsOffset.roundToInt()
                                 )
 
-                                val baseLa = when (_selectedAhenk.value) {
-                                    AhenkType.BOLAHENK -> 586.0
-                                    AhenkType.KIZ -> 415.0
-                                    AhenkType.SUPURDE -> 523.0
-                                    AhenkType.MANSUR -> 440.0
-                                }
-                                val kabaCargahFreq = baseLa / 2.25
-                                val komaIndex = ((53.0 * log2(adjustedPitch / kabaCargahFreq)).roundToInt() % 53 + 53) % 53
-                                pitchHistogram[komaIndex] += 1.0f
+                                val coreAhenk = Ahenk.fromString(_selectedAhenk.value.name)
+                                pitchHistogramEngine.addPitch(adjustedPitch, coreAhenk.getKabaCargahBaseFrequency())
                                 pitchDetectionCount++
                                 if (pitchDetectionCount % 3 == 0) {
-                                    _recognitionResult.value = MakamClassifier.classifyMakam(pitchHistogram, referenceTrainingVectors)
-                                }
-
-                                _detectedOctave.value = when (closestNote.second) {
-                                    in namesOctave0 -> 0 // Kaba
-                                    in namesOctave2 -> 2 // Tîz
-                                    else -> 1 // Orta
+                                    val result = MakamClassifierEngine.classify(
+                                        pitchHistogramEngine.getNormalizedHistogram(),
+                                        referenceTrainingVectors
+                                    )
+                                    _recognitionResult.value = MakamRecognitionResult(
+                                        makamAdi = result.makamName,
+                                        confidence = result.confidence,
+                                        tespitEdilenCesni = result.detectedCesni
+                                    )
                                 }
                             }
                         }

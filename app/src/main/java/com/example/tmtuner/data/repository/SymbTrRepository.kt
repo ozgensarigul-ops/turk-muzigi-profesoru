@@ -180,16 +180,12 @@ object SymbTrRepository {
         nuanceOffset: Int = 0,
         isEbAltoSax: Boolean = false
     ): Double {
-        val effectiveKoma = (perde.mutlakKoma + nuanceOffset).toDouble()
-
-        val rawFrequency = when (ahenk) {
-            AhenkType.BOLAHENK -> 330.0 * 2.0.pow((effectiveKoma - 40.0) / 53.0)
-            AhenkType.MANSUR -> 256.0 * 2.0.pow(effectiveKoma / 53.0)
-            AhenkType.KIZ -> 330.0 * 2.0.pow((effectiveKoma - 40.0) / 53.0) * (415.0 / 440.0)
-            AhenkType.SUPURDE -> 330.0 * 2.0.pow((effectiveKoma - 40.0) / 53.0) * (523.0 / 440.0)
-        }
-
-        return if (isEbAltoSax) rawFrequency * (27.0 / 16.0) else rawFrequency
+        val coreAhenk = com.example.tmtuner.core.musicology.model.Ahenk.fromString(ahenk.name)
+        val rawFrequency = com.example.tmtuner.core.musicology.math.Edo53Calculator.calculateAhenkPitch(
+            perde.mutlakKoma + nuanceOffset,
+            coreAhenk
+        )
+        return if (isEbAltoSax) com.example.tmtuner.core.musicology.math.Edo53Calculator.toEbAltoPitch(rawFrequency) else rawFrequency
     }
 
     /**
