@@ -1,8 +1,11 @@
 package com.example.tmtuner
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -18,21 +21,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.tmtuner.data.models.AhenkType
 
-data class TemelPerdeUiModel(
-    val ad: String,
-    val bati: String,
-    val pisagorOrani: String,
-    val mutlakKoma: Int,
-    val bolahenkFreq: Double,
-    val mansurFreq: Double
-)
-
 class MainActivity : ComponentActivity() {
+
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        // İzin durum yönetimi
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+
         setContent {
             MaterialTheme {
                 Surface(
@@ -40,6 +47,12 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val tunerViewModel: TMTunerViewModel = viewModel()
+                    
+                    // Canlı mikrofon akışını başlat
+                    LaunchedEffect(Unit) {
+                        tunerViewModel.startMicrophoneAnalysis()
+                    }
+
                     Column(modifier = Modifier.fillMaxSize()) {
                         MakamScreen(viewModel = tunerViewModel)
                     }
@@ -54,21 +67,10 @@ fun MakamScreen(viewModel: TMTunerViewModel) {
     val selectedAhenk by viewModel.selectedAhenk.collectAsState()
     val isEbAltoSax by viewModel.isEbAltoSax.collectAsState()
     val applySegahNuance by viewModel.applySegahNuance.collectAsState()
+    val currentPitch by viewModel.currentPitch.collectAsState()
+    val recognitionResult by viewModel.recognitionResult.collectAsState()
 
     var ahenkExpanded by remember { mutableStateOf(false) }
-
-    val temelPerdeler = remember {
-        listOf(
-            TemelPerdeUiModel("Râst", "G4", "3/2", 31, 293.33, 384.00),
-            TemelPerdeUiModel("Dügâh", "A4", "27/16", 40, 330.00, 432.00),
-            TemelPerdeUiModel("Segâh", "B4 (1k b.)", "4096/2187", 48, 366.23, 479.44),
-            TemelPerdeUiModel("Çârgâh", "C4", "2/1", 53, 391.11, 512.00),
-            TemelPerdeUiModel("Nevâ", "D4", "9/8", 62, 440.00, 576.00),
-            TemelPerdeUiModel("Hüseynî", "E4", "81/64", 71, 495.00, 648.00),
-            TemelPerdeUiModel("Eviç", "F#4 (4k d.)", "729/512", 80, 549.66, 719.18),
-            TemelPerdeUiModel("Gerdâniye", "G5", "3/1", 84, 586.66, 768.00)
-        )
-    }
 
     Column(
         modifier = Modifier
@@ -83,6 +85,39 @@ fun MakamScreen(viewModel: TMTunerViewModel) {
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
         )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Canlı Analiz Sonuç Kartı
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("Canlı DSP Frekans & Makam Sınıflandırma", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = currentPitch?.let { "${String.format(java.util.Locale.US, "%.2f", it.frequency)} Hz" } ?: "Ses Bekleniyor...",
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Text(
+                    text = currentPitch?.let { "Perde: ${it.noteName} (${it.centsOffset} cent)" } ?: "Mikrofon Dinleniyor",
+                    fontSize = 14.sp
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = recognitionResult?.let { "Tespit Edilen Makam: ${it.makamAdi} (%${(it.confidence * 100).toInt()})" } ?: "Makam Taranıyor...",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
 
         Card(
@@ -156,62 +191,6 @@ fun MakamScreen(viewModel: TMTunerViewModel) {
                         checked = applySegahNuance,
                         onCheckedChange = { viewModel.setSegahNuance(it) }
                     )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "8 Temel Perde Matrisi (53-EDO & Pisagor)",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Perde", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.2f))
-                    Text("Batı", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                    Text("Koma", fontWeight = FontWeight.Bold, modifier = Modifier.weight(0.8f))
-                    Text("Frekans", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.2f), textAlign = TextAlign.End)
-                }
-                HorizontalDivider()
-
-                temelPerdeler.forEach { perde ->
-                    val rawFreq = if (selectedAhenk == AhenkType.MANSUR) perde.mansurFreq else perde.bolahenkFreq
-                    val nuanceAdjusted = if (applySegahNuance && perde.ad == "Segâh") {
-                        rawFreq * Math.pow(2.0, -1.0 / 53.0)
-                    } else rawFreq
-                    val finalFreq = if (isEbAltoSax) nuanceAdjusted * (27.0 / 16.0) else nuanceAdjusted
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(perde.ad, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1.2f))
-                        Text(perde.bati, fontSize = 13.sp, color = Color.Gray, modifier = Modifier.weight(1f))
-                        Text("${perde.mutlakKoma}", fontSize = 13.sp, modifier = Modifier.weight(0.8f))
-                        Text(
-                            String.format(java.util.Locale.US, "%.2f Hz", finalFreq),
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.weight(1.2f),
-                            textAlign = TextAlign.End
-                        )
-                    }
                 }
             }
         }

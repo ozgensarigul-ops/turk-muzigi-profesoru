@@ -7,6 +7,9 @@ import android.media.AudioTrack
 import android.media.MediaRecorder
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.tmtuner.data.ml.MakamClassifier
+import com.example.tmtuner.data.ml.MakamPitchDistributionVector
+import com.example.tmtuner.data.ml.MakamRecognitionResult
 import com.example.tmtuner.data.models.AhenkType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,7 +22,14 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.log2
 import kotlin.math.pow
+import kotlin.math.roundToInt
 import kotlin.math.sin
+
+data class LivePitchData(
+    val frequency: Float,
+    val noteName: String,
+    val centsOffset: Int
+)
 
 class TMTunerViewModel : ViewModel() {
     private val _frequency = MutableStateFlow(0.0f)
@@ -58,6 +68,55 @@ class TMTunerViewModel : ViewModel() {
 
     private val _droneVolume = MutableStateFlow(0.5f)
     val droneVolume: StateFlow<Float> = _droneVolume.asStateFlow()
+
+    private val _currentPitch = MutableStateFlow<LivePitchData?>(null)
+    val currentPitch: StateFlow<LivePitchData?> = _currentPitch.asStateFlow()
+
+    private val _recognitionResult = MutableStateFlow<MakamRecognitionResult?>(null)
+    val recognitionResult: StateFlow<MakamRecognitionResult?> = _recognitionResult.asStateFlow()
+
+    private val pitchHistogram = FloatArray(53)
+    private var pitchDetectionCount = 0
+
+    private val referenceTrainingVectors: List<MakamPitchDistributionVector> by lazy {
+        listOf(
+            createVector("rast", "Rast", 0, 9, intArrayOf(0, 9, 17, 22, 31, 40, 48, 53)),
+            createVector("ussak", "Uşşak", 9, 22, intArrayOf(9, 17, 22, 31, 40, 44, 53, 62)),
+            createVector("buselik", "Buselik", 9, 31, intArrayOf(9, 18, 22, 31, 40, 44, 53, 62)),
+            createVector("hicaz", "Hicaz", 9, 22, intArrayOf(9, 14, 26, 31, 40, 44, 53, 62)),
+            createVector("huseyni", "Hüseyni", 9, 31, intArrayOf(9, 17, 22, 31, 40, 48, 53, 62))
+        )
+    }
+
+    private fun createVector(
+        id: String,
+        ad: String,
+        durak: Int,
+        guclu: Int,
+        komaIndices: IntArray
+    ): MakamPitchDistributionVector {
+        val hist = FloatArray(53)
+        for (idx in komaIndices) {
+            hist[idx % 53] += 1.0f
+        }
+        hist[durak % 53] += 3.0f
+        hist[guclu % 53] += 2.0f
+        var sumSquares = 0.0f
+        for (v in hist) sumSquares += v * v
+        val norm = kotlin.math.sqrt(sumSquares)
+        if (norm > 0f) {
+            for (i in hist.indices) hist[i] /= norm
+        }
+        return MakamPitchDistributionVector(
+            makamId = id,
+            makamAdi = ad,
+            ahenk = _selectedAhenk.value,
+            komaHistogram = hist,
+            durakKoma = durak,
+            gucluKoma = guclu,
+            isEbAltoSax = _isEbAltoSax.value
+        )
+    }
 
     private var audioJob: Job? = null
     private var audioTrack: AudioTrack? = null
@@ -172,6 +231,10 @@ class TMTunerViewModel : ViewModel() {
     private fun stopAudioInternally() { try { audioTrack?.stop(); audioTrack?.release() } catch (e: Exception) {} finally { audioTrack = null } }
     private fun stopAudio() { audioJob?.cancel(); stopAudioInternally() }
 
+    fun startMicrophoneAnalysis() {
+        startListening()
+    }
+
     fun startListening() {
         if (recordingJob != null) return
         recordingJob = viewModelScope.launch(Dispatchers.IO) {
@@ -199,7 +262,28 @@ class TMTunerViewModel : ViewModel() {
                             val closestNote = currentTMNotes.minByOrNull { abs(it.first - adjustedPitch) }
                             if (closestNote != null) {
                                 _detectedNote.value = closestNote.second
-                                _centsDifference.value = (1200.0 * log2(adjustedPitch / closestNote.first)).toFloat()
+                                val cents = (1200.0 * log2(adjustedPitch / closestNote.first)).toFloat()
+                                _centsDifference.value = cents
+
+                                _currentPitch.value = LivePitchData(
+                                    frequency = pitch,
+                                    noteName = closestNote.second,
+                                    centsOffset = cents.roundToInt()
+                                )
+
+                                val baseLa = when (_selectedAhenk.value) {
+                                    AhenkType.BOLAHENK -> 586.0
+                                    AhenkType.KIZ -> 415.0
+                                    AhenkType.SUPURDE -> 523.0
+                                    AhenkType.MANSUR -> 440.0
+                                }
+                                val kabaCargahFreq = baseLa / 2.25
+                                val komaIndex = ((53.0 * log2(adjustedPitch / kabaCargahFreq)).roundToInt() % 53 + 53) % 53
+                                pitchHistogram[komaIndex] += 1.0f
+                                pitchDetectionCount++
+                                if (pitchDetectionCount % 3 == 0) {
+                                    _recognitionResult.value = MakamClassifier.classifyMakam(pitchHistogram, referenceTrainingVectors)
+                                }
 
                                 _detectedOctave.value = when (closestNote.second) {
                                     in namesOctave0 -> 0 // Kaba
