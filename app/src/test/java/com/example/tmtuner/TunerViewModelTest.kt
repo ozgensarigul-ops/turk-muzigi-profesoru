@@ -1,5 +1,7 @@
 package com.example.tmtuner
 
+import com.example.tmtuner.core.audio.drone.AcousticDroneProfile
+import com.example.tmtuner.core.audio.drone.IDroneAudioPlayer
 import com.example.tmtuner.core.audio.engine.MicrotonalTunerEngine
 import com.example.tmtuner.core.audio.model.SegahNuanceMode
 import com.example.tmtuner.core.audio.recorder.IAudioRecorder
@@ -31,20 +33,24 @@ import kotlin.math.abs
  * 5. Bb Tenor Saksafon (8/9 ve 9/8 çarpanı) transpozisyon doğrulaması
  * 6. Özkan s. 51 Segâh İcra Nüansı (-1/-2 koma) ve Kehribar (Amber) rozet tetiklemesi
  * 7. Ney çeşitleri seçildiğinde Ahenk senkronizasyonu
+ * 8. Akustik Drone / Dem Sesi oynatma, makam ve çift dem yönetimi
  */
 class TunerViewModelTest {
 
     private lateinit var fakeRecorder: FakeAudioRecorder
+    private lateinit var fakeDronePlayer: FakeDroneAudioPlayer
     private lateinit var tunerEngine: MicrotonalTunerEngine
     private lateinit var viewModel: TunerViewModel
 
     @Before
     fun setUp() {
         fakeRecorder = FakeAudioRecorder()
+        fakeDronePlayer = FakeDroneAudioPlayer()
         tunerEngine = MicrotonalTunerEngine()
         viewModel = TunerViewModel(
             audioRecorder = fakeRecorder,
-            tunerEngine = tunerEngine
+            tunerEngine = tunerEngine,
+            dronePlayer = fakeDronePlayer
         )
     }
 
@@ -171,6 +177,67 @@ class TunerViewModelTest {
         assertEquals(Ahenk.MANSUR, viewModel.uiState.value.selectedAhenk)
     }
 
+    @Test
+    fun testDroneToggleAndPlayback() {
+        assertFalse(viewModel.uiState.value.isDronePlaying)
+
+        // Dem başlat
+        viewModel.toggleDrone()
+        assertTrue(viewModel.uiState.value.isDronePlaying)
+        assertTrue(fakeDronePlayer.isPlaying.value)
+
+        // Ses seviyesi ayarla
+        viewModel.setDroneVolume(0.75f)
+        assertEquals(0.75f, viewModel.uiState.value.droneVolume, 0.001f)
+        assertEquals(0.75f, fakeDronePlayer.volume.value, 0.001f)
+
+        // Dem durdur
+        viewModel.toggleDrone()
+        assertFalse(viewModel.uiState.value.isDronePlaying)
+        assertFalse(fakeDronePlayer.isPlaying.value)
+    }
+
+    @Test
+    fun testDroneMakamChangeUpdatesFrequencies() {
+        viewModel.setAhenk(Ahenk.MANSUR)
+
+        // Rast Makamı: Karar Rast perdesi (~293.33 Hz), Güçlü Neva perdesi (~440.0 Hz)
+        viewModel.setMakam("Rast")
+        assertEquals("Râst (Sol)", viewModel.uiState.value.droneTonicNoteName)
+        assertEquals(293.33, viewModel.uiState.value.droneTonicFrequency, 0.5)
+        assertEquals(440.0, viewModel.uiState.value.droneDominantFrequency, 0.5)
+
+        // Uşşak Makamı: Karar Dügâh perdesi (330.0 Hz)
+        viewModel.setMakam("Uşşak")
+        assertEquals("Dügâh (La)", viewModel.uiState.value.droneTonicNoteName)
+        assertEquals(330.0, viewModel.uiState.value.droneTonicFrequency, 0.5)
+
+        // Segâh Makamı: Karar Segâh perdesi (~330.0 * 4096/3888...)
+        viewModel.setMakam("Segâh")
+        assertEquals("Segâh (Si♭₁)", viewModel.uiState.value.droneTonicNoteName)
+        assertTrue(viewModel.uiState.value.droneTonicFrequency > 0.0)
+    }
+
+    @Test
+    fun testDroneProfileAndDualDroneState() {
+        // Tını profili değiştir
+        viewModel.setDroneProfile(AcousticDroneProfile.NEY)
+        assertEquals(AcousticDroneProfile.NEY, viewModel.uiState.value.droneProfile)
+        assertEquals(AcousticDroneProfile.NEY, fakeDronePlayer.profile.value)
+
+        viewModel.setDroneProfile(AcousticDroneProfile.PURE_SINE)
+        assertEquals(AcousticDroneProfile.PURE_SINE, viewModel.uiState.value.droneProfile)
+
+        // Çift Dem modu aç/kapa
+        viewModel.setDualDrone(true)
+        assertTrue(viewModel.uiState.value.isDualDrone)
+        assertTrue(fakeDronePlayer.isDualDrone.value)
+
+        viewModel.setDualDrone(false)
+        assertFalse(viewModel.uiState.value.isDualDrone)
+        assertFalse(fakeDronePlayer.isDualDrone.value)
+    }
+
     /**
      * Test amaçlı sahte (Fake) ses kayıt yöneticisi.
      */
@@ -194,6 +261,59 @@ class TunerViewModelTest {
 
         override fun stopRecording() {
             _isRecording.value = false
+        }
+    }
+
+    /**
+     * Test amaçlı sahte (Fake) drone yürütme motoru.
+     */
+    private class FakeDroneAudioPlayer : IDroneAudioPlayer {
+        private val _isPlaying = MutableStateFlow(false)
+        override val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
+
+        private val _volume = MutableStateFlow(0.5f)
+        override val volume: StateFlow<Float> = _volume.asStateFlow()
+
+        private val _profile = MutableStateFlow(AcousticDroneProfile.TANBURA)
+        override val profile: StateFlow<AcousticDroneProfile> = _profile.asStateFlow()
+
+        private val _isDualDrone = MutableStateFlow(false)
+        override val isDualDrone: StateFlow<Boolean> = _isDualDrone.asStateFlow()
+
+        private val _currentTonicFrequency = MutableStateFlow(440.0)
+        override val currentTonicFrequency: StateFlow<Double> = _currentTonicFrequency.asStateFlow()
+
+        private val _currentDominantFrequency = MutableStateFlow(660.0)
+        override val currentDominantFrequency: StateFlow<Double> = _currentDominantFrequency.asStateFlow()
+
+        override fun start(tonicFrequency: Double, dominantFrequency: Double?) {
+            _isPlaying.value = true
+            updateFrequencies(tonicFrequency, dominantFrequency)
+        }
+
+        override fun stop() {
+            _isPlaying.value = false
+        }
+
+        override fun updateFrequencies(tonicFrequency: Double, dominantFrequency: Double?) {
+            _currentTonicFrequency.value = tonicFrequency
+            _currentDominantFrequency.value = dominantFrequency ?: (tonicFrequency * 1.5)
+        }
+
+        override fun setVolume(volume: Float) {
+            _volume.value = volume
+        }
+
+        override fun setProfile(profile: AcousticDroneProfile) {
+            _profile.value = profile
+        }
+
+        override fun setDualDrone(enabled: Boolean) {
+            _isDualDrone.value = enabled
+        }
+
+        override fun release() {
+            _isPlaying.value = false
         }
     }
 }

@@ -18,29 +18,35 @@ import com.example.tmtuner.ui.theme.TMTunerTheme
 
 class MainActivity : ComponentActivity() {
 
+    private lateinit var tunerViewModel: TunerViewModel
+
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
-        // Mikrofon izin yönetimi
+        if (isGranted && ::tunerViewModel.isInitialized) {
+            tunerViewModel.startListening()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        }
-
         setContent {
+            tunerViewModel = viewModel()
             TMTunerTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    val tunerViewModel: TunerViewModel = viewModel()
                     MicrotonalTunerScreen(viewModel = tunerViewModel)
                 }
             }
+        }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        } else {
+            tunerViewModel.startListening()
         }
     }
 }

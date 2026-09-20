@@ -48,9 +48,22 @@ class AudioRecorderManager(
         val channelConfig = AudioFormat.CHANNEL_IN_MONO
         val audioEncoding = AudioFormat.ENCODING_PCM_16BIT
 
-        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioEncoding)
-        if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
-            throw IllegalStateException("Invalid AudioRecord parameters: sampleRate=$sampleRate")
+        // 44100 Hz ve 48000 Hz için güvenli tampon boyutu denetimi
+        val sampleRatesToTry = intArrayOf(sampleRate, 44100, 48000)
+        var actualSampleRate = sampleRate
+        var minBufferSize = -1
+
+        for (rate in sampleRatesToTry) {
+            val size = AudioRecord.getMinBufferSize(rate, channelConfig, audioEncoding)
+            if (size > 0) {
+                actualSampleRate = rate
+                minBufferSize = size
+                break
+            }
+        }
+
+        if (minBufferSize <= 0) {
+            throw IllegalStateException("AudioRecord bu donanımda desteklenmiyor (örnekleme hızı uyumsuzluğu).")
         }
 
         // Buffer size in bytes: allocate at least 2x minBufferSize or 2x frameSize bytes
@@ -60,14 +73,14 @@ class AudioRecorderManager(
         try {
             audioRecord = AudioRecord(
                 audioSource,
-                sampleRate,
+                actualSampleRate,
                 channelConfig,
                 audioEncoding,
                 bufferSizeBytes
             )
 
             if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
-                throw IllegalStateException("AudioRecord initialization failed. State: ${audioRecord.state}")
+                throw IllegalStateException("AudioRecord başlatılamadı. State: ${audioRecord.state}, sampleRate=$actualSampleRate")
             }
 
             audioRecord.startRecording()

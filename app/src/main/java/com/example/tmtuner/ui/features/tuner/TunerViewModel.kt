@@ -2,10 +2,14 @@ package com.example.tmtuner.ui.features.tuner
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.tmtuner.core.audio.drone.AcousticDroneProfile
+import com.example.tmtuner.core.audio.drone.DroneAudioPlayer
+import com.example.tmtuner.core.audio.drone.IDroneAudioPlayer
 import com.example.tmtuner.core.audio.engine.MicrotonalTunerEngine
 import com.example.tmtuner.core.audio.model.SegahNuanceMode
 import com.example.tmtuner.core.audio.recorder.AudioRecorderManager
 import com.example.tmtuner.core.audio.recorder.IAudioRecorder
+import com.example.tmtuner.core.musicology.atlas.AeuScaleAtlas
 import com.example.tmtuner.core.musicology.engine.TranspositionEngine
 import com.example.tmtuner.core.musicology.model.Ahenk
 import com.example.tmtuner.core.musicology.model.NeyType
@@ -27,16 +31,22 @@ import kotlinx.coroutines.launch
  * - Kız Âhengi (+22 koma, 4/3 oranı)
  * - Ney Çeşitleri & Transpoze Batı Enstrümanları (Eb Alto Sax 16/27, Bb Tenor Sax 8/9)
  * - Özkan s. 51 gereği Segâh İcra Toleransı (-1.0 / -2.0 koma)
+ * - Akustik Referans Sentezleyici (Tanbûra, Ney, Saf Sinüs Karar & Güçlü Dem Sesi)
  */
-class TunerViewModel(
+class TunerViewModel @JvmOverloads constructor(
     val audioRecorder: IAudioRecorder = AudioRecorderManager(),
-    val tunerEngine: MicrotonalTunerEngine = MicrotonalTunerEngine()
+    val tunerEngine: MicrotonalTunerEngine = MicrotonalTunerEngine(),
+    val dronePlayer: IDroneAudioPlayer = DroneAudioPlayer()
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TunerUiState())
     val uiState: StateFlow<TunerUiState> = _uiState.asStateFlow()
 
     private var recordingJob: Job? = null
+
+    init {
+        updateDroneTuning()
+    }
 
     fun toggleListening() {
         if (_uiState.value.isRecording) {
@@ -93,8 +103,12 @@ class TunerViewModel(
      */
     fun processAudioBuffer(buffer: ShortArray, sampleRate: Int) {
         val detection = tunerEngine.pitchDetector.detectPitch(buffer, sampleRate)
+        val normalizedRms = (detection.rmsEnergy * 6.0).coerceIn(0.0, 1.0).toFloat()
+        
+        _uiState.update { it.copy(rmsLevel = normalizedRms) }
+
         if (detection.isPitched && detection.frequency > 20.0) {
-            processFrequency(detection.frequency, detection.clarity.toDouble())
+            processFrequency(detection.frequency, detection.clarity)
         }
     }
 
@@ -149,6 +163,7 @@ class TunerViewModel(
 
     fun setAhenk(ahenk: Ahenk) {
         _uiState.update { it.copy(selectedAhenk = ahenk) }
+        updateDroneTuning()
         reAnalyzeCurrentPitch()
     }
 
@@ -164,6 +179,7 @@ class TunerViewModel(
                 selectedAhenk = if (syncAhenk) neyType.ahenk else it.selectedAhenk
             )
         }
+        updateDroneTuning()
         reAnalyzeCurrentPitch()
     }
 
@@ -175,6 +191,61 @@ class TunerViewModel(
     fun setUsePhysicalMansur(usePhysical: Boolean) {
         _uiState.update { it.copy(usePhysicalMansur = usePhysical) }
         reAnalyzeCurrentPitch()
+    }
+
+    // --- Akustik Referans Sentezleyici (Drone / Dem Sesi) Yönetimi ---
+
+    fun toggleDrone() {
+        if (_uiState.value.isDronePlaying) {
+            stopDrone()
+        } else {
+            startDrone()
+        }
+    }
+
+    fun startDrone() {
+        val state = _uiState.value
+        dronePlayer.start(state.droneTonicFrequency, state.droneDominantFrequency)
+        _uiState.update { it.copy(isDronePlaying = true) }
+    }
+
+    fun stopDrone() {
+        dronePlayer.stop()
+        _uiState.update { it.copy(isDronePlaying = false) }
+    }
+
+    fun setDroneVolume(volume: Float) {
+        dronePlayer.setVolume(volume)
+        _uiState.update { it.copy(droneVolume = volume) }
+    }
+
+    fun setDroneProfile(profile: AcousticDroneProfile) {
+        dronePlayer.setProfile(profile)
+        _uiState.update { it.copy(droneProfile = profile) }
+    }
+
+    fun setDualDrone(enabled: Boolean) {
+        dronePlayer.setDualDrone(enabled)
+        _uiState.update { it.copy(isDualDrone = enabled) }
+    }
+
+    fun setMakam(makamName: String) {
+        _uiState.update { it.copy(selectedMakam = makamName) }
+        updateDroneTuning()
+    }
+
+    private fun updateDroneTuning() {
+        val state = _uiState.value
+        val tuning = AeuScaleAtlas.calculateMakamDroneTuning(state.selectedMakam, state.selectedAhenk)
+        _uiState.update {
+            it.copy(
+                droneTonicNoteName = tuning.tonicPerdeName,
+                droneTonicFrequency = tuning.tonicFrequency,
+                droneDominantNoteName = tuning.dominantPerdeName,
+                droneDominantFrequency = tuning.dominantFrequency
+            )
+        }
+        dronePlayer.updateFrequencies(tuning.tonicFrequency, tuning.dominantFrequency)
     }
 
     private fun reAnalyzeCurrentPitch() {
@@ -191,5 +262,6 @@ class TunerViewModel(
     override fun onCleared() {
         super.onCleared()
         stopListening()
+        dronePlayer.release()
     }
 }

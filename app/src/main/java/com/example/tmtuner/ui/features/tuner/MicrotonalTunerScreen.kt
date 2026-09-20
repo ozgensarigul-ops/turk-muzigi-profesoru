@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -56,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -65,6 +67,7 @@ import com.example.tmtuner.core.audio.model.SegahNuanceMode
 import com.example.tmtuner.core.musicology.model.Ahenk
 import com.example.tmtuner.core.musicology.model.NeyType
 import com.example.tmtuner.core.musicology.model.TransposingInstrument
+import com.example.tmtuner.ui.components.AcousticDronePanel
 import com.example.tmtuner.ui.components.KomaGaugeDial
 import java.util.Locale
 
@@ -280,6 +283,39 @@ fun MicrotonalTunerScreen(
             modifier = Modifier.padding(top = 8.dp)
         )
 
+        // Canlı Donanım/Emülatör Mikrofon Seviye Göstergesi
+        if (uiState.isRecording) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 24.dp)
+            ) {
+                Text(
+                    text = "Giriş: ",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.outline
+                )
+                Box(
+                    modifier = Modifier
+                        .height(6.dp)
+                        .width(130.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(fraction = uiState.rmsLevel.coerceIn(0.02f, 1f))
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(Color(0xFF4CAF50), Color(0xFFFFEB3B), Color(0xFFF44336))
+                                )
+                            )
+                    )
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
 
         // 5. Selectors & Settings Card
@@ -463,5 +499,27 @@ fun MicrotonalTunerScreen(
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 6. Akustik Referans Sentezleyici (Dem Sesi / Drone) Paneli
+        AcousticDronePanel(
+            isPlaying = uiState.isDronePlaying,
+            volume = uiState.droneVolume,
+            profile = uiState.droneProfile,
+            isDualDrone = uiState.isDualDrone,
+            selectedMakam = uiState.selectedMakam,
+            tonicNoteName = uiState.droneTonicNoteName,
+            tonicFrequency = uiState.droneTonicFrequency,
+            dominantNoteName = uiState.droneDominantNoteName,
+            dominantFrequency = uiState.droneDominantFrequency,
+            onTogglePlay = { viewModel.toggleDrone() },
+            onVolumeChange = { viewModel.setDroneVolume(it) },
+            onProfileSelect = { viewModel.setDroneProfile(it) },
+            onDualDroneToggle = { viewModel.setDualDrone(it) },
+            onMakamSelect = { viewModel.setMakam(it) }
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }

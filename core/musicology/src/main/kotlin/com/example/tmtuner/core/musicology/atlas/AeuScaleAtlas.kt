@@ -115,9 +115,9 @@ object AeuScaleAtlas {
     }
 
     /**
-     * Makamın karar perdesi için analitik drone (dem) frekansını hesaplar.
+     * Makamın karar perdesi ve güçlü (dominant) perdesi için analitik drone frekanslarını hesaplar.
      */
-    fun calculateDroneFrequency(makamName: String, ahenk: Ahenk): Pair<String, Double> {
+    fun calculateMakamDroneTuning(makamName: String, ahenk: Ahenk): MakamDroneTuning {
         val baseFreq = when (ahenk) {
             Ahenk.BOLAHENK -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE // 1760/9 Hz
             Ahenk.MANSUR -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE   // Mansur diyapazonda Dügâh 330 Hz referansı
@@ -129,27 +129,73 @@ object AeuScaleAtlas {
             Ahenk.DAVUD -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE * (366.27 / 440.0)
         }
 
+        // Orta Nevâ perdesi (9/4 oranı = 440.0 Hz Mansur'da)
+        val nevaFreq = baseFreq * (9.0 / 4.0)
+
         return when {
             makamName.contains("Rast", ignoreCase = true) ||
             makamName.contains("Nihavend", ignoreCase = true) ||
             makamName.contains("Mahur", ignoreCase = true) -> {
-                // Rast perdesi: Tam Beşli (3/2) = (1760/9) * 1.5 = 880/3 ≈ 293.333 Hz
-                Pair("Râst Perdesi (Sol)", baseFreq * 1.5)
+                // Rast perdesi: Tam Beşli (3/2) ≈ 293.333 Hz, Güçlü: Nevâ (440.0 Hz, 3/2 beşli üstü)
+                MakamDroneTuning(
+                    makamName = makamName,
+                    tonicPerdeName = "Râst (Sol)",
+                    tonicFrequency = baseFreq * 1.5,
+                    dominantPerdeName = "Nevâ (Re)",
+                    dominantFrequency = nevaFreq
+                )
             }
             makamName.contains("Segah", ignoreCase = true) ||
             makamName.contains("Segâh", ignoreCase = true) -> {
-                // Segâh perdesi: 4096/2187 oranı
-                Pair("Segâh Perdesi (Si♭₁)", baseFreq * (4096.0 / 2187.0))
+                // Segâh perdesi: 4096/2187 oranı, Güçlü: Nevâ
+                MakamDroneTuning(
+                    makamName = makamName,
+                    tonicPerdeName = "Segâh (Si♭₁)",
+                    tonicFrequency = baseFreq * (4096.0 / 2187.0),
+                    dominantPerdeName = "Nevâ (Re)",
+                    dominantFrequency = nevaFreq
+                )
             }
             makamName.contains("Cargah", ignoreCase = true) ||
             makamName.contains("Çârgâh", ignoreCase = true) -> {
-                // Çârgâh perdesi: 2.0 oranı (Orta Çârgâh = 3520/9 ≈ 391.111 Hz)
-                Pair("Çârgâh Perdesi (Do)", baseFreq * 2.0)
+                // Çârgâh perdesi: 2.0 oranı, Güçlü: Gerdâniye (3.0 oranı)
+                MakamDroneTuning(
+                    makamName = makamName,
+                    tonicPerdeName = "Çârgâh (Do)",
+                    tonicFrequency = baseFreq * 2.0,
+                    dominantPerdeName = "Gerdâniye (Sol)",
+                    dominantFrequency = baseFreq * 3.0
+                )
             }
             else -> {
-                // Standart Dügâh Kararı (Uşşak, Hicaz, Hüseyni vb.): 27/16 = 330.0 Hz
-                Pair("Dügâh Perdesi (La)", baseFreq * (27.0 / 16.0))
+                // Standart Dügâh Kararı (Uşşak, Hicaz, Hüseyni vb.): 27/16 = 330.0 Hz, Güçlü: Nevâ (440.0 Hz)
+                MakamDroneTuning(
+                    makamName = makamName,
+                    tonicPerdeName = "Dügâh (La)",
+                    tonicFrequency = baseFreq * (27.0 / 16.0),
+                    dominantPerdeName = "Nevâ (Re)",
+                    dominantFrequency = nevaFreq
+                )
             }
         }
     }
+
+    /**
+     * Makamın karar perdesi için analitik drone (dem) frekansını hesaplar.
+     */
+    fun calculateDroneFrequency(makamName: String, ahenk: Ahenk): Pair<String, Double> {
+        val tuning = calculateMakamDroneTuning(makamName, ahenk)
+        return Pair(tuning.tonicPerdeName, tuning.tonicFrequency)
+    }
 }
+
+/**
+ * Makam dem sesi (karar + güçlü perdesi) frekans bilgisi.
+ */
+data class MakamDroneTuning(
+    val makamName: String,
+    val tonicPerdeName: String,
+    val tonicFrequency: Double,
+    val dominantPerdeName: String,
+    val dominantFrequency: Double
+)
