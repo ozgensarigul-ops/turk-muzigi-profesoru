@@ -64,11 +64,11 @@ object AeuScaleAtlas {
      * Verilen ahenk düzenine göre 3 oktav boyunca tüm 72 perdenin frekans ve özelliklerini
      * Özkan Tablo I saf Pisagor kesirleri ile analitik olarak üretir.
      */
-    fun buildPitchAtlas(ahenk: Ahenk): List<PerdeNote> {
+    fun buildPitchAtlas(ahenk: Ahenk, usePhysicalMansur: Boolean = false): List<PerdeNote> {
         // Analitik temel Kaba Çârgâh frekansı
         val baseFreq = when (ahenk) {
             Ahenk.BOLAHENK -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE // 440 * (4/9) ≈ 195.5556 Hz
-            Ahenk.MANSUR -> Edo53Calculator.MANSUR_KABA_CARGAH_BASE     // 256.0 Hz (Fizik Çârgâh)
+            Ahenk.MANSUR -> if (usePhysicalMansur) Edo53Calculator.MANSUR_KABA_CARGAH_BASE else (440.0 * 16.0 / 27.0)
             Ahenk.KIZ -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE * (16.0 / 9.0) // Tam Dörtlü tiz (+22 koma, 4/3 oranı)
             Ahenk.SUPURDE -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE * (523.2 / 440.0)
             Ahenk.MUSTAHSEN -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE * (495.0 / 440.0)

@@ -22,3 +22,4 @@ dependencyResolutionManagement {
 rootProject.name = "turk-muzigi-profesoru"
 include(":app")
 include(":core:musicology")
+include(":core:audio")
