@@ -188,10 +188,10 @@ object Edo53Calculator {
     }
 
     /**
-     * Kız ahenginde frekans üretir (La = 415 Hz referansı).
+     * Kız ahenginde frekans üretir (Mansur'a göre Tam Dörtlü tiz, 4/3 oranı, +22 koma).
      */
     fun toKizPitch(mutlakKoma: Int): Double {
-        return toBolahenkPitch(mutlakKoma) * (415.0 / 440.0)
+        return toMansurPitch(mutlakKoma) * (4.0 / 3.0)
     }
 
     /**
@@ -210,6 +210,7 @@ object Edo53Calculator {
             Ahenk.MANSUR -> toMansurPitch(mutlakKoma)
             Ahenk.KIZ -> toKizPitch(mutlakKoma)
             Ahenk.SUPURDE -> toSupurdePitch(mutlakKoma)
+            else -> toBolahenkPitch(mutlakKoma) * (ahenk.referenceLa / 440.0)
         }
     }
 
