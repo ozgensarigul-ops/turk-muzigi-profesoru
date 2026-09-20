@@ -63,14 +63,15 @@ class DroneAudioPlayer(
         synthesizer.targetVolume = _volume.value
 
         playbackJob?.cancel()
-        playbackJob = playerScope.launch {
+        playbackJob = playerScope.launch(Dispatchers.Default) {
             try {
                 initAndStartAudioTrack()
-                val buffer = ShortArray(frameSize)
+                val pcmBuffer = ShortArray(frameSize)
 
                 while (isActive && _isPlaying.value) {
-                    synthesizer.renderPcm16(buffer, 0, frameSize)
-                    val written = audioTrack?.write(buffer, 0, frameSize) ?: -1
+                    synthesizer.renderPcm16(pcmBuffer, 0, frameSize)
+                    val track = audioTrack ?: break
+                    val written = track.write(pcmBuffer, 0, pcmBuffer.size, AudioTrack.WRITE_BLOCKING)
                     if (written < 0) {
                         break
                     }
@@ -134,8 +135,15 @@ class DroneAudioPlayer(
 
         val channelConfig = AudioFormat.CHANNEL_OUT_MONO
         val audioEncoding = AudioFormat.ENCODING_PCM_16BIT
-        val minBufferSize = AudioTrack.getMinBufferSize(sampleRate, channelConfig, audioEncoding)
-        val bufferSizeBytes = maxOf(minBufferSize * 2, frameSize * 2 * 2)
+
+        // Donanımın yerel çıkış frekansını al (AudioFlinger yeniden örnekleme ve distorsiyonunu önler)
+        val nativeRate = AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC)
+        val actualSampleRate = if (nativeRate in 44100..48000) nativeRate else sampleRate
+        synthesizer.sampleRate = actualSampleRate
+
+        val minBufferSize = AudioTrack.getMinBufferSize(actualSampleRate, channelConfig, audioEncoding)
+        // Underrun ve gecikmeleri önlemek için çift tampon boyutu (örnek cinsinden en az 4096, bayt cinsinden 8192)
+        val bufferSizeBytes = maxOf(minBufferSize * 2, 4096 * 2)
 
         val attributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -143,7 +151,7 @@ class DroneAudioPlayer(
             .build()
 
         val format = AudioFormat.Builder()
-            .setSampleRate(sampleRate)
+            .setSampleRate(actualSampleRate)
             .setChannelMask(channelConfig)
             .setEncoding(audioEncoding)
             .build()

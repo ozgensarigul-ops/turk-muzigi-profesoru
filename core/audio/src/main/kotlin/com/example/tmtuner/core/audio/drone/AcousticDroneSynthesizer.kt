@@ -22,7 +22,7 @@ import kotlin.math.sin
  * @param sampleRate Örnekleme hızı (Hz), varsayılan 44100 Hz.
  */
 class AcousticDroneSynthesizer(
-    val sampleRate: Int = 44100
+    @Volatile var sampleRate: Int = 44100
 ) {
     // Akustik ayarlar
     @Volatile var tonicFrequency: Double = 440.0
@@ -75,9 +75,9 @@ class AcousticDroneSynthesizer(
         val domFreq = dominantFrequency
         val dual = isDualDroneEnabled
 
-        val twoPi = 2.0 * PI
-        val tonicIncrement = twoPi * tonicFreq / sampleRate
-        val domIncrement = twoPi * domFreq / sampleRate
+        val twoPi = 2.0 * Math.PI
+        val tonicIncrement = (twoPi * tonicFreq) / sampleRate
+        val domIncrement = (twoPi * domFreq) / sampleRate
 
         for (i in 0 until length) {
             // Kazanç yumuşatma (Anti-pop)
@@ -87,22 +87,22 @@ class AcousticDroneSynthesizer(
                 currentVolume = (currentVolume - gainSlewRate).coerceAtLeast(targetGain)
             }
 
-            // 1. Tonik (Karar) dalga formu - Harmonik katkı sentezi
+            // 1. Tonik (Karar) dalga formu - Harmonik katkı sentezi (2*PI modüle açılar)
             var tonicSample = 0.0
             for (h in profileWeights.indices) {
                 val harmonicIndex = h + 1
-                val harmonicAngle = phaseTonic * harmonicIndex
+                val harmonicAngle = (phaseTonic * harmonicIndex) % twoPi
                 tonicSample += profileWeights[h] * sin(harmonicAngle)
             }
             tonicSample *= invWeightSum
 
-            // 2. Güçlü (Dominant) dalga formu (aktifse)
+            // 2. Güçlü (Dominant) dalga formu (aktifse - 2*PI modüle açılar)
             var finalSample = tonicSample
             if (dual) {
                 var domSample = 0.0
                 for (h in profileWeights.indices) {
                     val harmonicIndex = h + 1
-                    val harmonicAngle = phaseDominant * harmonicIndex
+                    val harmonicAngle = (phaseDominant * harmonicIndex) % twoPi
                     domSample += profileWeights[h] * sin(harmonicAngle)
                 }
                 domSample *= invWeightSum
@@ -110,21 +110,22 @@ class AcousticDroneSynthesizer(
                 finalSample = 0.70 * tonicSample + 0.30 * domSample
             }
 
-            // 3. Genel kazanç uygulama ve 16-bit PCM ölçekleme
-            val scaledSample = finalSample * currentVolume * Short.MAX_VALUE
+            // 3. Genel kazanç uygulama ve 16-bit PCM ölçekleme (DAC distorsiyonunu önleyen -1.5 dB headroom)
+            val masterHeadroom = 0.85
+            val scaledSample = finalSample * currentVolume * (Short.MAX_VALUE * masterHeadroom)
             val clampedSample = scaledSample.coerceIn(Short.MIN_VALUE.toDouble(), Short.MAX_VALUE.toDouble())
             buffer[offset + i] = clampedSample.toInt().toShort()
 
-            // 4. Faz birikimi (Kesintisiz döngü)
+            // 4. Kesintisiz 2*PI Faz Normalizasyonu (Floating-point hassasiyet kaybını ve yırtılmaları önler)
             phaseTonic += tonicIncrement
             if (phaseTonic >= twoPi) {
-                phaseTonic -= twoPi
+                phaseTonic %= twoPi
             }
 
             if (dual) {
                 phaseDominant += domIncrement
                 if (phaseDominant >= twoPi) {
-                    phaseDominant -= twoPi
+                    phaseDominant %= twoPi
                 }
             }
         }

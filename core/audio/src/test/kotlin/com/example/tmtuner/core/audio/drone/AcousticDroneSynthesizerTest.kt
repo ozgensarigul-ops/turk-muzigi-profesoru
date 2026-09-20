@@ -148,4 +148,24 @@ class AcousticDroneSynthesizerTest {
         }
         assertTrue("Çift dem aktifken sinyal formu değişmelidir", isDifferent)
     }
+
+    @Test
+    fun testLongRunningSynthesisStability() {
+        synthesizer.setFrequencies(440.0, 660.0)
+        synthesizer.targetVolume = 0.9f
+        synthesizer.profile = AcousticDroneProfile.TANBURA
+        synthesizer.isDualDroneEnabled = true
+
+        val buffer = ShortArray(frameSize)
+        // 100 saniyelik sürekli akış (~4300 tampon)
+        for (f in 0 until 4300) {
+            synthesizer.renderPcm16(buffer)
+            var hasNonZero = false
+            for (s in buffer) {
+                if (s != 0.toShort()) hasNonZero = true
+                assertTrue("Sinyal PCM sınırlarında kalmalı", s in Short.MIN_VALUE..Short.MAX_VALUE)
+            }
+            assertTrue("Tampon sıfır olmamalı", hasNonZero)
+        }
+    }
 }

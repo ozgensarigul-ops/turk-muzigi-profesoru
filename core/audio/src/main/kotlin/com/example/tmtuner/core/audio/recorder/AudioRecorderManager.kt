@@ -35,7 +35,7 @@ interface IAudioRecorder {
  * @param audioSource Audio source from [MediaRecorder.AudioSource], default is MIC.
  */
 class AudioRecorderManager(
-    override val sampleRate: Int = 44100,
+    override var sampleRate: Int = 44100,
     override val frameSize: Int = 2048,
     private val audioSource: Int = MediaRecorder.AudioSource.MIC
 ) : IAudioRecorder {
@@ -48,64 +48,89 @@ class AudioRecorderManager(
         val channelConfig = AudioFormat.CHANNEL_IN_MONO
         val audioEncoding = AudioFormat.ENCODING_PCM_16BIT
 
-        // 44100 Hz ve 48000 Hz için güvenli tampon boyutu denetimi
-        val sampleRatesToTry = intArrayOf(sampleRate, 44100, 48000)
-        var actualSampleRate = sampleRate
-        var minBufferSize = -1
-
-        for (rate in sampleRatesToTry) {
-            val size = AudioRecord.getMinBufferSize(rate, channelConfig, audioEncoding)
-            if (size > 0) {
-                actualSampleRate = rate
-                minBufferSize = size
-                break
-            }
-        }
-
-        if (minBufferSize <= 0) {
-            throw IllegalStateException("AudioRecord bu donanımda desteklenmiyor (örnekleme hızı uyumsuzluğu).")
-        }
-
-        // Buffer size in bytes: allocate at least 2x minBufferSize or 2x frameSize bytes
-        val bufferSizeBytes = maxOf(minBufferSize * 2, frameSize * 2)
-
+        // Olası donanım/emülatör farklılıkları için sıralı aday örnekleme hızları
+        val candidateRates = intArrayOf(sampleRate, 44100, 48000, 16000).distinct()
         var audioRecord: AudioRecord? = null
-        try {
-            audioRecord = AudioRecord(
-                audioSource,
-                actualSampleRate,
-                channelConfig,
-                audioEncoding,
-                bufferSizeBytes
-            )
 
-            if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
-                throw IllegalStateException("AudioRecord başlatılamadı. State: ${audioRecord.state}, sampleRate=$actualSampleRate")
+        for (rate in candidateRates) {
+            val minBufferSize = AudioRecord.getMinBufferSize(rate, channelConfig, audioEncoding)
+            // minBufferSize yetersizliklerine veya hata kodlarına karşı fallback tampon hesabı
+            val bufferSizeBytes = if (minBufferSize > 0) {
+                maxOf(minBufferSize * 4, frameSize * 4, 4096)
+            } else {
+                maxOf(frameSize * 4, 4096)
             }
 
-            audioRecord.startRecording()
-            _isRecording.value = true
+            try {
+                val record = AudioRecord(
+                    audioSource,
+                    rate,
+                    channelConfig,
+                    audioEncoding,
+                    bufferSizeBytes
+                )
 
+                if (record.state == AudioRecord.STATE_INITIALIZED) {
+                    audioRecord = record
+                    sampleRate = rate
+                    android.util.Log.i("TMTunerAudio", "AudioRecord başarıyla başlatıldı: sampleRate=$rate, bufferSize=$bufferSizeBytes")
+                    break
+                } else {
+                    record.release()
+                }
+            } catch (se: SecurityException) {
+                // Güvenlik / izin hatası üst katmana iletilmeli
+                throw se
+            } catch (e: Exception) {
+                android.util.Log.w("TMTunerAudio", "SampleRate $rate denenirken hata: ${e.message}")
+            }
+        }
+
+        if (audioRecord == null || audioRecord.state != AudioRecord.STATE_INITIALIZED) {
+            throw IllegalStateException("AudioRecord başlatılamadı. Hiçbir örnekleme hızında STATE_INITIALIZED elde edilemedi.")
+        }
+
+        try {
+            audioRecord.startRecording()
+            if (audioRecord.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                throw IllegalStateException("AudioRecord kayda başlayamadı. State: ${audioRecord.recordingState}")
+            }
+
+            _isRecording.value = true
             val buffer = ShortArray(frameSize)
+            var logCounter = 0
 
             while (coroutineContext.isActive && _isRecording.value) {
                 val readCount = audioRecord.read(buffer, 0, frameSize)
                 if (readCount > 0) {
+                    if (logCounter++ % 50 == 0) {
+                        var maxSample = 0
+                        for (s in buffer) {
+                            val absS = kotlin.math.abs(s.toInt())
+                            if (absS > maxSample) maxSample = absS
+                        }
+                        android.util.Log.d("TMTunerAudio", "Ses tamponu okundu ($readCount örnek), Tepe genlik: $maxSample")
+                    }
                     emit(buffer.copyOf(readCount))
                 } else if (readCount < 0) {
                     // AudioRecord.ERROR_INVALID_OPERATION, ERROR_BAD_VALUE, ERROR_DEAD_OBJECT
+                    android.util.Log.e("TMTunerAudio", "AudioRecord okuma hatası: $readCount")
                     break
                 }
             }
         } finally {
             try {
-                if (audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                if (audioRecord.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                     audioRecord.stop()
                 }
             } catch (_: Exception) {
                 // Ignore cleanup errors
             }
-            audioRecord?.release()
+            try {
+                audioRecord.release()
+            } catch (_: Exception) {
+                // Ignore cleanup errors
+            }
             _isRecording.value = false
         }
     }.flowOn(Dispatchers.IO)
