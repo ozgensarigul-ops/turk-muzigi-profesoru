@@ -68,11 +68,17 @@ private val COMMON_MAKAMS = listOf(
     "Uşşak",
     "Hicaz",
     "Hüseyni",
-    "Nihavend",
+    "Hümâyûn",
+    "Uzzal",
+    "Zîrgûleli Hicaz",
+    "Karcığar",
+    "Basit Sûz'nâk",
+    "Nevâ",
     "Segâh",
     "Çârgâh",
     "Kürdî",
-    "Karcığar"
+    "Bûselik",
+    "Nihavend"
 )
 
 /**

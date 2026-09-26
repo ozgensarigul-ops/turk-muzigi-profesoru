@@ -10,11 +10,17 @@ import com.example.tmtuner.core.musicology.model.Ahenk
 import com.example.tmtuner.core.musicology.model.NeyType
 import com.example.tmtuner.core.musicology.model.TransposingInstrument
 import com.example.tmtuner.ui.features.tuner.TunerViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -34,9 +40,12 @@ import kotlin.math.abs
  * 6. Özkan s. 51 Segâh İcra Nüansı (-1/-2 koma) ve Kehribar (Amber) rozet tetiklemesi
  * 7. Ney çeşitleri seçildiğinde Ahenk senkronizasyonu
  * 8. Akustik Drone / Dem Sesi oynatma, makam ve çift dem yönetimi
+ * 9. MakamDetectionEngine entegrasyonu ve UI State reaktif akışı
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class TunerViewModelTest {
 
+    private val testDispatcher = UnconfinedTestDispatcher()
     private lateinit var fakeRecorder: FakeAudioRecorder
     private lateinit var fakeDronePlayer: FakeDroneAudioPlayer
     private lateinit var tunerEngine: MicrotonalTunerEngine
@@ -44,6 +53,7 @@ class TunerViewModelTest {
 
     @Before
     fun setUp() {
+        Dispatchers.setMain(testDispatcher)
         fakeRecorder = FakeAudioRecorder()
         fakeDronePlayer = FakeDroneAudioPlayer()
         tunerEngine = MicrotonalTunerEngine()
@@ -51,6 +61,67 @@ class TunerViewModelTest {
             audioRecorder = fakeRecorder,
             tunerEngine = tunerEngine,
             dronePlayer = fakeDronePlayer
+        )
+    }
+
+    @After
+    fun tearDown() {
+        Dispatchers.resetMain()
+    }
+
+    @Test
+    fun testMakamDetectionIntegration() {
+        viewModel.setAhenk(Ahenk.BOLAHENK)
+        viewModel.setInstrument(TransposingInstrument.CONCERT_C)
+
+        // Bolâhenk Dügâh = 330.0 Hz
+        viewModel.processFrequency(330.0)
+        val stateAfterDugah = viewModel.uiState.value
+        assertEquals("Dügâh", stateAfterDugah.perdeName)
+        
+        val makamState = stateAfterDugah.makamDetectionState
+        assertTrue("Makam tespit durumu güncellenmiş olmalıdır", makamState != null)
+        assertTrue("Histogram Dügâh perdesini içermelidir", makamState!!.pitchHistogram.containsKey("Dügâh"))
+        
+        // Sıfırlama testi
+        viewModel.resetMakamDetection()
+        val stateAfterReset = viewModel.uiState.value
+        assertEquals("Sıfırlama sonrası makam tespit durumu null olmalıdır", null, stateAfterReset.makamDetectionState)
+    }
+
+    @Test
+    fun testTransposedInstrumentMakamAnalysis() {
+        viewModel.setAhenk(Ahenk.MANSUR)
+        viewModel.setInstrument(TransposingInstrument.EB_ALTO_SAX)
+
+        // Eb Alto Saksafoncu notada 'Do / Çârgâh' (Mansur 521.48 Hz) bastığında:
+        // Akustik ortamda duyulan konsert sesi: 521.4815 * (16/27) ≈ 309.026 Hz (Kaba Dik Hisâr / Eb).
+        val writtenCargahFreq = 260.7407 * 2.0 // Çârgâh = 521.4814 Hz
+        val acousticConcertFreq = writtenCargahFreq * (16.0 / 27.0) // ≈ 309.026 Hz
+        viewModel.processFrequency(acousticConcertFreq)
+
+        val state = viewModel.uiState.value
+        // 1. İcracının ekranında transpoze enstrüman perdesi (Çârgâh / Do) görünür
+        assertEquals("İcracının ekranında transpoze yazılı perde Çârgâh görünmelidir", "Çârgâh", state.perdeName)
+        assertEquals(acousticConcertFreq, state.concertFrequency, 0.01)
+
+        // 2. MakamDetectionEngine'e transpozisyon kaynaklı makam kayması olmaması için
+        // asıl akustik konser perdesi (Kaba Dik Hisâr) beslenmelidir.
+        val makamState = state.makamDetectionState
+        assertTrue("Makam tespit durumu oluşturulmalıdır", makamState != null)
+        assertTrue(
+            "Makam motoru histogramı konsert perdesini (Kaba Dik Hisâr) içermelidir",
+            makamState!!.pitchHistogram.keys.any { it.contains("Hisâr", ignoreCase = true) }
+        )
+
+        // 3. Ortamda Konser Dügâh (440.0 Hz) tınladığında:
+        // Saksafoncu transpoze olarak Mahur (F#) görür, ama makam motoru Dügâh perdesini alır!
+        viewModel.processFrequency(440.0)
+        val stateAfterConcertDugah = viewModel.uiState.value
+        assertEquals("Mahur", stateAfterConcertDugah.perdeName)
+        assertTrue(
+            "Makam motoru konsert Dügâh perdesini doğru kaydetmelidir",
+            stateAfterConcertDugah.makamDetectionState!!.pitchHistogram.containsKey("Dügâh")
         )
     }
 

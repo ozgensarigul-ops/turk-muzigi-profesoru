@@ -8,28 +8,41 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.concurrent.Executors
 
 /**
  * Android AudioTrack PCM akışı tabanlı kesintisiz Akustik Referans Sentezleyici yürütücüsü.
  *
- * @param sampleRate Örnekleme hızı (varsayılan 44100 Hz).
- * @param frameSize Döngü başına işlenecek örnek sayısı (varsayılan 2048 örnek).
+ * @param sampleRate Örnekleme hızı (varsayılan 48000 Hz, desteklenmezse 44100 Hz fallback).
+ * @param frameSize Döngü başına işlenecek örnek sayısı (varsayılan 2048 short örnek).
  */
 class DroneAudioPlayer(
-    val sampleRate: Int = 44100,
+    val sampleRate: Int = 48000,
     val frameSize: Int = 2048,
     val synthesizer: AcousticDroneSynthesizer = AcousticDroneSynthesizer(sampleRate)
 ) : IDroneAudioPlayer {
 
+    private val audioExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "DroneAudioTrackThread").apply {
+            priority = Thread.MAX_PRIORITY
+        }
+    }
+    private val audioDispatcher = audioExecutor.asCoroutineDispatcher()
+
     private val playerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var playbackJob: Job? = null
+    private var stopJob: Job? = null
     private var audioTrack: AudioTrack? = null
+    private val lock = Any()
 
     private val _isPlaying = MutableStateFlow(false)
     override val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
@@ -59,25 +72,33 @@ class DroneAudioPlayer(
         updateFrequencies(tonicFrequency, dominantFrequency)
         if (_isPlaying.value) return
 
+        stopJob?.cancel()
+        stopJob = null
+
         _isPlaying.value = true
         synthesizer.targetVolume = _volume.value
 
         playbackJob?.cancel()
-        playbackJob = playerScope.launch(Dispatchers.Default) {
+        playbackJob = playerScope.launch(audioDispatcher) {
             try {
                 initAndStartAudioTrack()
                 val pcmBuffer = ShortArray(frameSize)
 
                 while (isActive && _isPlaying.value) {
                     synthesizer.renderPcm16(pcmBuffer, 0, frameSize)
-                    val track = audioTrack ?: break
+
+                    val track = synchronized(lock) { audioTrack } ?: break
+                    if (track.playState != AudioTrack.PLAYSTATE_PLAYING) {
+                        break
+                    }
+
                     val written = track.write(pcmBuffer, 0, pcmBuffer.size, AudioTrack.WRITE_BLOCKING)
                     if (written < 0) {
                         break
                     }
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                // Log or ignore unexpected playback error
             } finally {
                 cleanupAudioTrack()
                 _isPlaying.value = false
@@ -86,16 +107,18 @@ class DroneAudioPlayer(
     }
 
     override fun stop() {
-        if (!_isPlaying.value) return
-        playerScope.launch {
-            // Anti-pop: Durdurmadan önce kazancı sıfırlayıp kısa bir rampa bekle
+        if (!_isPlaying.value && stopJob == null) return
+        stopJob?.cancel()
+        stopJob = playerScope.launch {
+            // Anti-pop: Durdurmadan önce kazancı sıfırlayıp yumuşak iniş bekle (~50 ms)
             synthesizer.targetVolume = 0f
-            delay(30)
+            delay(50)
             _isPlaying.value = false
-            playbackJob?.cancel()
+            playbackJob?.cancelAndJoin()
             playbackJob = null
             cleanupAudioTrack()
             synthesizer.resetPhase()
+            stopJob = null
         }
     }
 
@@ -105,6 +128,10 @@ class DroneAudioPlayer(
             val dom = dominantFrequency ?: (tonicFrequency * 1.5)
             _currentDominantFrequency.value = dom
             synthesizer.setFrequencies(tonicFrequency, dom)
+
+            if (_isPlaying.value) {
+                flushBuffer()
+            }
         }
     }
 
@@ -127,7 +154,30 @@ class DroneAudioPlayer(
     }
 
     override fun release() {
-        stop()
+        stopJob?.cancel()
+        _isPlaying.value = false
+        playbackJob?.cancel()
+        cleanupAudioTrack()
+        playerScope.cancel()
+        audioDispatcher.close()
+        audioExecutor.shutdown()
+    }
+
+    private fun flushBuffer() {
+        synchronized(lock) {
+            try {
+                audioTrack?.let { track ->
+                    if (track.state == AudioTrack.STATE_INITIALIZED &&
+                        track.playState == AudioTrack.PLAYSTATE_PLAYING
+                    ) {
+                        track.pause()
+                        track.flush()
+                        track.play()
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
     }
 
     private fun initAndStartAudioTrack() {
@@ -136,14 +186,22 @@ class DroneAudioPlayer(
         val channelConfig = AudioFormat.CHANNEL_OUT_MONO
         val audioEncoding = AudioFormat.ENCODING_PCM_16BIT
 
-        // Donanımın yerel çıkış frekansını al (AudioFlinger yeniden örnekleme ve distorsiyonunu önler)
-        val nativeRate = AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC)
-        val actualSampleRate = if (nativeRate in 44100..48000) nativeRate else sampleRate
+        // Sample Rate: 48000 Hz (cihaz desteklemiyorsa 44100 Hz fallback)
+        val preferredSampleRate = 48000
+        val fallbackSampleRate = 44100
+        val minBuf48k = AudioTrack.getMinBufferSize(preferredSampleRate, channelConfig, audioEncoding)
+
+        val (actualSampleRate, minBufferSize) = if (minBuf48k > 0) {
+            preferredSampleRate to minBuf48k
+        } else {
+            fallbackSampleRate to AudioTrack.getMinBufferSize(fallbackSampleRate, channelConfig, audioEncoding)
+        }
+
         synthesizer.sampleRate = actualSampleRate
 
-        val minBufferSize = AudioTrack.getMinBufferSize(actualSampleRate, channelConfig, audioEncoding)
-        // Underrun ve gecikmeleri önlemek için çift tampon boyutu (örnek cinsinden en az 4096, bayt cinsinden 8192)
-        val bufferSizeBytes = maxOf(minBufferSize * 2, 4096 * 2)
+        // Buffer boyutu: minBufferSize * 2 veya en az 4096 short örnek (8192 bayt)
+        val minShortsBytes = 4096 * 2
+        val bufferSizeBytes = maxOf(minBufferSize * 2, minShortsBytes)
 
         val attributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -156,29 +214,36 @@ class DroneAudioPlayer(
             .setEncoding(audioEncoding)
             .build()
 
-        val track = AudioTrack(
-            attributes,
-            format,
-            bufferSizeBytes,
-            AudioTrack.MODE_STREAM,
-            AudioManager.AUDIO_SESSION_ID_GENERATE
-        )
+        synchronized(lock) {
+            val track = AudioTrack(
+                attributes,
+                format,
+                bufferSizeBytes,
+                AudioTrack.MODE_STREAM,
+                AudioManager.AUDIO_SESSION_ID_GENERATE
+            )
 
-        track.play()
-        audioTrack = track
+            track.play()
+            audioTrack = track
+        }
     }
 
     private fun cleanupAudioTrack() {
-        try {
-            audioTrack?.let { track ->
-                if (track.playState == AudioTrack.PLAYSTATE_PLAYING) {
-                    track.stop()
+        synchronized(lock) {
+            try {
+                audioTrack?.let { track ->
+                    if (track.state == AudioTrack.STATE_INITIALIZED) {
+                        if (track.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                            track.stop()
+                        }
+                        track.flush()
+                        track.release()
+                    }
                 }
-                track.release()
+            } catch (_: Exception) {
+            } finally {
+                audioTrack = null
             }
-        } catch (_: Exception) {
-            // Temizleme hataları yok sayılır
         }
-        audioTrack = null
     }
 }

@@ -9,11 +9,15 @@ import com.example.tmtuner.core.audio.engine.MicrotonalTunerEngine
 import com.example.tmtuner.core.audio.model.SegahNuanceMode
 import com.example.tmtuner.core.audio.recorder.AudioRecorderManager
 import com.example.tmtuner.core.audio.recorder.IAudioRecorder
+import com.example.tmtuner.core.musicology.analysis.FrequencyEstimator
 import com.example.tmtuner.core.musicology.atlas.AeuScaleAtlas
+import com.example.tmtuner.core.musicology.engine.MakamDetectionEngine
 import com.example.tmtuner.core.musicology.engine.TranspositionEngine
 import com.example.tmtuner.core.musicology.model.Ahenk
 import com.example.tmtuner.core.musicology.model.NeyType
 import com.example.tmtuner.core.musicology.model.TransposingInstrument
+import kotlin.math.abs
+import kotlin.math.log2
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,11 +36,13 @@ import kotlinx.coroutines.launch
  * - Ney Çeşitleri & Transpoze Batı Enstrümanları (Eb Alto Sax 16/27, Bb Tenor Sax 8/9)
  * - Özkan s. 51 gereği Segâh İcra Toleransı (-1.0 / -2.0 koma)
  * - Akustik Referans Sentezleyici (Tanbûra, Ney, Saf Sinüs Karar & Güçlü Dem Sesi)
+ * - 53-EDO Makam Tanıma ve Seyir Analiz Motoru (MakamDetectionEngine)
  */
 class TunerViewModel @JvmOverloads constructor(
     val audioRecorder: IAudioRecorder = AudioRecorderManager(),
     val tunerEngine: MicrotonalTunerEngine = MicrotonalTunerEngine(),
-    val dronePlayer: IDroneAudioPlayer = DroneAudioPlayer()
+    val dronePlayer: IDroneAudioPlayer = DroneAudioPlayer(),
+    val makamEngine: MakamDetectionEngine = MakamDetectionEngine()
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TunerUiState())
@@ -44,8 +50,17 @@ class TunerViewModel @JvmOverloads constructor(
 
     private var recordingJob: Job? = null
 
+    // Canlı akış histerezis ve kararlılık takibi
+    private var lastObservedConcertFreq: Double = 0.0
+    private var consecutiveStableFrames: Int = 0
+
     init {
         updateDroneTuning()
+        viewModelScope.launch {
+            makamEngine.detectionResult.collect { result ->
+                _uiState.update { it.copy(makamDetectionState = result) }
+            }
+        }
     }
 
     fun toggleListening() {
@@ -108,7 +123,41 @@ class TunerViewModel @JvmOverloads constructor(
         _uiState.update { it.copy(rmsLevel = normalizedRms) }
 
         if (detection.isPitched && detection.frequency > 20.0) {
-            processFrequency(detection.frequency, detection.clarity)
+            val state = _uiState.value
+            val minMelodic = if (state.selectedAhenk == Ahenk.KIZ) 350.0 else FrequencyEstimator.DEFAULT_MIN_MELODIC_HZ
+            val stabilizedFreq = FrequencyEstimator.disambiguateOctave(
+                detectedFrequency = detection.frequency,
+                minMelodicFreq = minMelodic,
+                maxMelodicFreq = FrequencyEstimator.DEFAULT_MAX_MELODIC_HZ
+            )
+
+            // Histerezis ve Anlık Dip/Sıçrama Filtresi:
+            // Ney icrasında nefes kaçması sonucu 1 pencerelik 270 Hz veya 1600+ Hz sıçramalarını filtrele.
+            // Önceki frekans ile 3 koma (~%3.9) içinde tutarlı ise ardışık sayaç artar.
+            val komaDiff = if (lastObservedConcertFreq > 20.0) {
+                abs(53.0 * log2(stabilizedFreq / lastObservedConcertFreq))
+            } else {
+                0.0
+            }
+
+            if (komaDiff <= 3.0) {
+                consecutiveStableFrames++
+            } else {
+                consecutiveStableFrames = 1
+            }
+            lastObservedConcertFreq = stabilizedFreq
+
+            // UI kadranını hemen güncelle (akıcı ibre), ancak makam motoruna yalnızca kararlı tınlayan sesleri ilet
+            val isStableForMakam = (consecutiveStableFrames >= 2 || detection.clarity > 0.88)
+            processFrequency(
+                concertFrequency = stabilizedFreq,
+                clarity = detection.clarity,
+                rmsEnergy = detection.rmsEnergy.toFloat(),
+                feedToMakamEngine = isStableForMakam
+            )
+        } else {
+            consecutiveStableFrames = 0
+            lastObservedConcertFreq = 0.0
         }
     }
 
@@ -117,19 +166,32 @@ class TunerViewModel @JvmOverloads constructor(
      *
      * @param concertFrequency Ortamda tınlayan / mikrofondan yakalanan akustik konsert frekansı (Hz)
      * @param clarity Algılama berraklığı (0.0 .. 1.0)
+     * @param rmsEnergy Sinyal RMS enerji seviyesi (0.0f .. 1.0f)
+     * @param feedToMakamEngine Makam tanıma motoru histogramına aktarılıp aktarılmayacağı
      */
-    fun processFrequency(concertFrequency: Double, clarity: Double = 1.0) {
+    fun processFrequency(
+        concertFrequency: Double,
+        clarity: Double = 1.0,
+        rmsEnergy: Float = 1.0f,
+        feedToMakamEngine: Boolean = true
+    ) {
         if (concertFrequency <= 0.0) return
 
         val state = _uiState.value
+        val minMelodic = if (state.selectedAhenk == Ahenk.KIZ) 350.0 else FrequencyEstimator.DEFAULT_MIN_MELODIC_HZ
+        val stabilizedConcertFreq = FrequencyEstimator.disambiguateOctave(
+            detectedFrequency = concertFrequency,
+            minMelodicFreq = minMelodic,
+            maxMelodicFreq = FrequencyEstimator.DEFAULT_MAX_MELODIC_HZ
+        )
 
         // Enstrüman transpozisyonu: Konsert tınısından icracının bastığı yazılı perdeye dönüşüm
         val writtenPitch = TranspositionEngine.toInstrumentPitch(
-            concertPitch = concertFrequency,
+            concertPitch = stabilizedConcertFreq,
             instrument = state.selectedInstrument
         )
 
-        // 53-EDO perde atlasında analiz
+        // 53-EDO perde atlasında analiz (İcracının bastığı enstrüman/yazılı perdesi)
         val result = tunerEngine.analyzePitch(
             detectedFrequency = writtenPitch,
             clarity = clarity,
@@ -138,6 +200,29 @@ class TunerViewModel @JvmOverloads constructor(
             segahMode = state.segahMode
         )
 
+        // Makam Analiz Motoru için Konsert / Asıl Perde analizi
+        val concertResult = if (state.selectedInstrument == TransposingInstrument.CONCERT_C) {
+            result
+        } else {
+            tunerEngine.analyzePitch(
+                detectedFrequency = stabilizedConcertFreq,
+                clarity = clarity,
+                ahenk = state.selectedAhenk,
+                usePhysicalMansur = state.usePhysicalMansur,
+                segahMode = state.segahMode
+            )
+        }
+
+        if (concertResult != null && feedToMakamEngine) {
+            // Saksafon/Ney transpozisyonunda MakamDetectionEngine'e daima asıl Konser Perdesi gönderilir.
+            makamEngine.feedPitch(
+                perdeName = concertResult.perdeName,
+                komaOffset = concertResult.komaDifference,
+                durationMs = 100L,
+                rmsEnergy = rmsEnergy
+            )
+        }
+
         if (result != null) {
             val isSegah = isSegahPerde(result.perdeName)
             val isSegahNuanceTriggered = isSegah && state.segahMode != SegahNuanceMode.NONE
@@ -145,7 +230,7 @@ class TunerViewModel @JvmOverloads constructor(
             _uiState.update {
                 it.copy(
                     detectedFrequency = writtenPitch,
-                    concertFrequency = concertFrequency,
+                    concertFrequency = stabilizedConcertFreq,
                     targetFrequency = result.targetFrequency,
                     perdeName = result.perdeName,
                     octaveName = result.octaveName,
@@ -163,6 +248,7 @@ class TunerViewModel @JvmOverloads constructor(
 
     fun setAhenk(ahenk: Ahenk) {
         _uiState.update { it.copy(selectedAhenk = ahenk) }
+        makamEngine.ahenk = ahenk
         updateDroneTuning()
         reAnalyzeCurrentPitch()
     }
@@ -173,10 +259,12 @@ class TunerViewModel @JvmOverloads constructor(
     }
 
     fun setNeyType(neyType: NeyType, syncAhenk: Boolean = true) {
+        val newAhenk = if (syncAhenk) neyType.ahenk else _uiState.value.selectedAhenk
+        makamEngine.ahenk = newAhenk
         _uiState.update {
             it.copy(
                 selectedNeyType = neyType,
-                selectedAhenk = if (syncAhenk) neyType.ahenk else it.selectedAhenk
+                selectedAhenk = newAhenk
             )
         }
         updateDroneTuning()
@@ -259,9 +347,22 @@ class TunerViewModel @JvmOverloads constructor(
         return name.contains("Segâh", ignoreCase = true) || name.contains("Segah", ignoreCase = true)
     }
 
+    /**
+     * Makam tanıma motorunu ve UI durumunu sıfırlar.
+     */
+    fun resetMakamDetection() {
+        makamEngine.reset()
+        _uiState.update { it.copy(makamDetectionState = null) }
+    }
+
     override fun onCleared() {
         super.onCleared()
         stopListening()
         dronePlayer.release()
     }
 }
+
+/**
+ * Görev ve mimari uyumluluğu için tür takma adı (typealias).
+ */
+typealias MainTunerViewModel = TunerViewModel

@@ -69,11 +69,11 @@ enum class NeyType(
     KIZ(
         displayName = "Kız Ney",
         ahenk = Ahenk.KIZ,
-        rastNoteInWestern = "Re (D5)",
-        komaShiftFromMansur = 22, // Tam Dörtlü tiz (+22 koma, 4/3 oranı)
-        ratioFromMansur = 4.0 / 3.0,
+        rastNoteInWestern = "La (A4)",
+        komaShiftFromMansur = 9, // 1 Tanini tiz (+9 koma, 9/8 oranı)
+        ratioFromMansur = 9.0 / 8.0,
         approximateLengthCm = "68-70 cm",
-        description = "Mansur'a göre Tam Dörtlü tiz (+22 koma, 4/3 oranı). Dügâh ≈ 586.67 Hz (Re5)."
+        description = "Mansur'a göre 1 Tanini tiz (+9 koma, 9/8 oranı). Dügâh = Si (B4), Râst = La (A4)."
     ),
 
     MANSUR(

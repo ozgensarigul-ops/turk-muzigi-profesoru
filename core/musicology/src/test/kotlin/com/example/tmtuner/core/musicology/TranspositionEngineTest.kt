@@ -55,12 +55,12 @@ class TranspositionEngineTest {
 
     @Test
     fun testKizReferenceFrequencies() {
-        // Kız Düzeni: Mansur'a göre Tam Dörtlü tiz (+22 koma, 4/3 oranı, Dügâh = Re5)
-        assertEquals(440.0 * (4.0 / 3.0), TranspositionEngine.KIZ_DUGAH_HZ, delta)
-        assertEquals(586.667, TranspositionEngine.KIZ_DUGAH_HZ, 0.01)
-        assertEquals(586.667, TranspositionEngine.getDugahFrequency(Ahenk.KIZ), 0.01)
-        assertEquals(22, TranspositionEngine.KIZ_KOMA_FROM_MANSUR)
-        assertEquals(4.0 / 3.0, TranspositionEngine.KIZ_RATIO_FROM_MANSUR, delta)
+        // Kız Düzeni: Mansur'a göre 1 Tanini tiz (+9 koma, 9/8 oranı, Dügâh = Si / B4 = 495.0 Hz - Özkan s. 87)
+        assertEquals(440.0 * (9.0 / 8.0), TranspositionEngine.KIZ_DUGAH_HZ, delta)
+        assertEquals(495.0, TranspositionEngine.KIZ_DUGAH_HZ, 0.01)
+        assertEquals(495.0, TranspositionEngine.getDugahFrequency(Ahenk.KIZ), 0.01)
+        assertEquals(9, TranspositionEngine.KIZ_KOMA_FROM_MANSUR)
+        assertEquals(9.0 / 8.0, TranspositionEngine.KIZ_RATIO_FROM_MANSUR, delta)
     }
 
     // =========================================================================
@@ -151,9 +151,9 @@ class TranspositionEngineTest {
         assertEquals(1.0, NeyType.MANSUR.ratioFromMansur, delta)
         assertEquals(Ahenk.MANSUR, NeyType.MANSUR.ahenk)
 
-        // Kız Ney: Mansur'a göre Tam Dörtlü tiz (+22 koma, 4/3 oranı)
-        assertEquals(22, NeyType.KIZ.komaShiftFromMansur)
-        assertEquals(4.0 / 3.0, NeyType.KIZ.ratioFromMansur, delta)
+        // Kız Ney: Mansur'a göre 1 Tanini tiz (+9 koma, 9/8 oranı - Özkan s. 87)
+        assertEquals(9, NeyType.KIZ.komaShiftFromMansur)
+        assertEquals(9.0 / 8.0, NeyType.KIZ.ratioFromMansur, delta)
         assertEquals(Ahenk.KIZ, NeyType.KIZ.ahenk)
 
         // Bolâhenk Ney: Mansur'a göre Tam Dörtlü pes (-22 koma, 3/4 oranı)
@@ -191,7 +191,7 @@ class TranspositionEngineTest {
 
         // Analitik oran ile transpozisyon (useExactRatio = true)
         val kizExact = TranspositionEngine.transposeBetweenNeys(mansurFreq, NeyType.MANSUR, NeyType.KIZ, useExactRatio = true)
-        assertEquals(mansurFreq * (4.0 / 3.0), kizExact, delta)
+        assertEquals(mansurFreq * (9.0 / 8.0), kizExact, delta)
 
         val bolahenkExact = TranspositionEngine.transposeBetweenNeys(mansurFreq, NeyType.MANSUR, NeyType.BOLAHENK, useExactRatio = true)
         assertEquals(mansurFreq * (3.0 / 4.0), bolahenkExact, delta)
@@ -201,16 +201,16 @@ class TranspositionEngineTest {
     fun testTransposeBetweenAhenks() {
         val mansurLa = 440.0
 
-        // Mansur -> Kız Âhengi (Tam Dörtlü tiz: x 4/3)
+        // Mansur -> Kız Âhengi (1 Tanini tiz: x 9/8)
         val kizLa = TranspositionEngine.transposeBetweenAhenks(mansurLa, Ahenk.MANSUR, Ahenk.KIZ)
-        assertEquals(440.0 * (4.0 / 3.0), kizLa, delta)
-        assertEquals(586.667, kizLa, 0.01)
+        assertEquals(440.0 * (9.0 / 8.0), kizLa, delta)
+        assertEquals(495.0, kizLa, 0.01)
 
         // Mansur -> Bolâhenk Âhengi (Tam Dörtlü pes: x 3/4)
         val bolahenkLa = TranspositionEngine.transposeBetweenAhenks(mansurLa, Ahenk.MANSUR, Ahenk.BOLAHENK)
         assertEquals(330.0, bolahenkLa, delta)
 
-        // Bolâhenk -> Kız Âhengi (330 * 16/9 = 586.6667 Hz)
+        // Bolâhenk -> Kız Âhengi (330 * (495/330) = 495.0 Hz)
         val bolahenkToKiz = TranspositionEngine.transposeBetweenAhenks(bolahenkLa, Ahenk.BOLAHENK, Ahenk.KIZ)
         assertEquals(kizLa, bolahenkToKiz, delta)
     }
@@ -250,5 +250,30 @@ class TranspositionEngineTest {
                 assertEquals("Minor third invertibility failed for instrument ${inst.name} at freq $freq", freq, backToInstThird, 0.0001)
             }
         }
+    }
+
+    @Test
+    fun testAhenkDirectionalTransposition() {
+        // Kız Neyi icrası (495 Hz = Si) sisteme girerken Mansur'a dönüştürülmek için
+        // 9 KOMA PESTLEŞTİRİLİR (495 * 8/9 = 440 Hz = Dügâh)
+        val kizLiveFrequency = 495.0
+        val concertFromKiz = TranspositionEngine.toConcertPitch(kizLiveFrequency, Ahenk.KIZ)
+        assertEquals(440.0, concertFromKiz, delta)
+
+        // Mansur 440 Hz Kız Neyi icrasına dönüştürülürken 9 KOMA TİZLEŞTİRİLİR (440 * 9/8 = 495 Hz)
+        val icraForKiz = TranspositionEngine.toIcraPitch(440.0, Ahenk.KIZ)
+        assertEquals(495.0, icraForKiz, delta)
+
+        // Bolâhenk icrası (330 Hz) Mansur'a dönüştürülürken 22 KOMA TİZLEŞTİRİLİR (330 * 4/3 = 440 Hz)
+        val concertFromBolahenk = TranspositionEngine.toConcertPitch(330.0, Ahenk.BOLAHENK)
+        assertEquals(440.0, concertFromBolahenk, delta)
+
+        // Koma dönüşüm yönü: Kız Neyi koma indeksi 9 koma eksiltilmelidir
+        val kizDugahKoma = 49 // Si / B
+        val concertKoma = TranspositionEngine.transposeKomaToConcert(kizDugahKoma, Ahenk.KIZ)
+        assertEquals(40, concertKoma) // 49 - 9 = 40 (Dügâh / La)
+
+        val restoredKoma = TranspositionEngine.transposeKomaFromConcert(concertKoma, Ahenk.KIZ)
+        assertEquals(kizDugahKoma, restoredKoma)
     }
 }

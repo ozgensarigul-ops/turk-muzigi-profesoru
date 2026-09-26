@@ -3,6 +3,7 @@ package com.example.tmtuner.ui.features.tuner
 import com.example.tmtuner.core.audio.drone.AcousticDroneProfile
 import com.example.tmtuner.core.audio.model.SegahNuanceMode
 import com.example.tmtuner.core.musicology.model.Ahenk
+import com.example.tmtuner.core.musicology.model.MakamDetectionResult
 import com.example.tmtuner.core.musicology.model.NeyType
 import com.example.tmtuner.core.musicology.model.TransposingInstrument
 
@@ -39,5 +40,8 @@ data class TunerUiState(
     val droneTonicNoteName: String = "Râst (Sol)",
     val droneTonicFrequency: Double = 293.33,
     val droneDominantNoteName: String = "Nevâ (Re)",
-    val droneDominantFrequency: Double = 440.0
+    val droneDominantFrequency: Double = 440.0,
+
+    // Canlı 53-EDO Makam Tanıma ve Seyir Analiz Durumu
+    val makamDetectionState: MakamDetectionResult? = null
 )

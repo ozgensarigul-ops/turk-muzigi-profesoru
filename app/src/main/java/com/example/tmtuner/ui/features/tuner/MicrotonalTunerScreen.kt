@@ -69,6 +69,7 @@ import com.example.tmtuner.core.musicology.model.NeyType
 import com.example.tmtuner.core.musicology.model.TransposingInstrument
 import com.example.tmtuner.ui.components.AcousticDronePanel
 import com.example.tmtuner.ui.components.KomaGaugeDial
+import com.example.tmtuner.ui.components.MakamSeyirPanel
 import java.util.Locale
 
 /**
@@ -502,7 +503,15 @@ fun MicrotonalTunerScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 6. Akustik Referans Sentezleyici (Dem Sesi / Drone) Paneli
+        // 6. Canlı Makam & Seyir Gösterge Paneli
+        MakamSeyirPanel(
+            detectionResult = uiState.makamDetectionState,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 7. Akustik Referans Sentezleyici (Dem Sesi / Drone) Paneli
         AcousticDronePanel(
             isPlaying = uiState.isDronePlaying,
             volume = uiState.droneVolume,
@@ -522,4 +531,15 @@ fun MicrotonalTunerScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
     }
+}
+
+/**
+ * Görev ve ekran isimlendirmesi için Composable sarmalayıcı.
+ */
+@Composable
+fun TunerScreen(
+    viewModel: TunerViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
+    modifier: Modifier = Modifier
+) {
+    MicrotonalTunerScreen(viewModel = viewModel, modifier = modifier)
 }

@@ -56,11 +56,11 @@ class PitchMatcherTest {
     @Test
     fun testDroneCalculations() {
         val (noteNameRast, freqRast) = AeuScaleAtlas.calculateDroneFrequency("Rast", Ahenk.MANSUR)
-        assertEquals("Râst Perdesi (Sol)", noteNameRast)
+        assertEquals("Râst (Sol)", noteNameRast)
         assertEquals(293.33, freqRast, 0.1)
 
         val (noteNameDugah, freqDugah) = AeuScaleAtlas.calculateDroneFrequency("Uşşak", Ahenk.MANSUR)
-        assertEquals("Dügâh Perdesi (La)", noteNameDugah)
+        assertEquals("Dügâh (La)", noteNameDugah)
         assertEquals(330.0, freqDugah, 0.1)
     }
 }

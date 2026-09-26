@@ -151,6 +151,27 @@ class PitchDetectorTest {
     }
 
     @Test
+    fun testNeyAcousticStrongThirdHarmonicDetection() {
+        val sampleRate = 44100
+        val fundamental = 550.0 // Kız Neyi Segâh perdesi
+        val numSamples = 2048
+        val buffer = DoubleArray(numSamples)
+        for (i in 0 until numSamples) {
+            val t = i.toDouble() / sampleRate
+            // Ney akustiği: 3. harmonik (1650 Hz) nefes rezonansı ile güçlü tınlar
+            buffer[i] = 0.45 * sin(2.0 * PI * fundamental * t) +
+                    0.20 * sin(2.0 * PI * (2 * fundamental) * t) +
+                    0.40 * sin(2.0 * PI * (3 * fundamental) * t)
+        }
+
+        val result = detector.detectPitch(buffer, sampleRate)
+
+        assertTrue("Ney sinyali algılanmalı", result.isPitched)
+        // 1650 Hz 3. harmonik yerine temel 550 Hz seçilmelidir
+        assertEquals(fundamental, result.frequency, 1.0)
+    }
+
+    @Test
     fun testFloatArrayAndShortArrayBuffers() {
         val sampleRate = 44100
         val targetFreq = 440.0

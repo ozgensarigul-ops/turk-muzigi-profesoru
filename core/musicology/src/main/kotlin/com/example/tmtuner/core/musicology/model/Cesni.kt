@@ -34,6 +34,8 @@ data class Cesni(
             description = "Uşşak, Beyati, Isfahan makamlarının temel gövdesi (K-S-T)"
         )
 
+        val USSAK_QUARTET = USSAK_DORTLUSU
+
         val BUSELIK_BESLISI = Cesni(
             id = "buselik_beslisi",
             name = "Bûselik Beşlisi",

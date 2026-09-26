@@ -26,11 +26,11 @@ enum class Ahenk(
         ratioFromMansur = 3.0 / 4.0
     ),
     KIZ(
-        displayName = "Kız (Dügâh = Re5 / La ≈ 586.67 Hz)",
-        referenceLa = 440.0 * (4.0 / 3.0), // 586.6666666666666 Hz
-        description = "Mansur'a göre Tam Dörtlü tiz (+22 koma, 4/3 oranı). Dügâh ≈ 586.67 Hz (Re5)",
-        komaShiftFromMansur = 22,
-        ratioFromMansur = 4.0 / 3.0
+        displayName = "Kız Neyi (Dügâh = Si / B ≈ 495 Hz)",
+        referenceLa = 495.0, // 440.0 * (9.0 / 8.0)
+        description = "Mansur'a göre 1 Tanini tiz (+9 koma, 9/8 oranı). Dügâh ≈ 495 Hz (Si / B)",
+        komaShiftFromMansur = 9,
+        ratioFromMansur = 9.0 / 8.0
     ),
     SUPURDE(
         displayName = "Süpürde (La = 523.2 Hz)",
@@ -78,6 +78,9 @@ enum class Ahenk(
     }
 
     companion object {
+        /** Kız Neyi için doğrudan standart erişim takma adı */
+        val KIZ_NEYI: Ahenk get() = KIZ
+
         fun fromString(name: String): Ahenk {
             return when {
                 name.contains("Bolahenk", ignoreCase = true) || name.contains("Bolâhenk", ignoreCase = true) -> BOLAHENK

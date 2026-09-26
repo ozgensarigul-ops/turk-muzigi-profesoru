@@ -1,5 +1,6 @@
 package com.example.tmtuner.core.audio.detector
 
+import com.example.tmtuner.core.musicology.analysis.FrequencyEstimator
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -19,7 +20,7 @@ import kotlin.math.sqrt
  */
 class PitchDetector(
     val minFrequency: Double = 50.0,
-    val maxFrequency: Double = 2000.0,
+    val maxFrequency: Double = 1400.0,
     val clarityThreshold: Double = 0.70,
     val peakCutoffRatio: Double = 0.90,
     val silenceThreshold: Double = 0.005
@@ -150,6 +151,16 @@ class PitchDetector(
                 break
             }
         }
+
+        // Harmonik Tepe Doğrulama (Harmonic Peak Validation):
+        // Bas armoniklere düşüşleri ve aşırı tiz üst harmoniklere (3x, 2x) sıçramayı engelleyen filtre.
+        selectedTau = FrequencyEstimator.disambiguatePeriodLag(
+            selectedTau = selectedTau,
+            peakLags = peakIndices,
+            nsdf = nsdf,
+            sampleRate = sampleRate,
+            harmonicToleranceRatio = 0.70
+        )
 
         // 7. Parabolik İnterpolasyon (Sub-sample Peak Refinement)
         val alpha = nsdf[selectedTau - 1]

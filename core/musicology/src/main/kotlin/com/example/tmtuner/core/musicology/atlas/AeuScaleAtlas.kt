@@ -69,12 +69,12 @@ object AeuScaleAtlas {
         val baseFreq = when (ahenk) {
             Ahenk.BOLAHENK -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE // 440 * (4/9) ≈ 195.5556 Hz
             Ahenk.MANSUR -> if (usePhysicalMansur) Edo53Calculator.MANSUR_KABA_CARGAH_BASE else (440.0 * 16.0 / 27.0)
-            Ahenk.KIZ -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE * (16.0 / 9.0) // Tam Dörtlü tiz (+22 koma, 4/3 oranı)
-            Ahenk.SUPURDE -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE * (523.2 / 440.0)
-            Ahenk.MUSTAHSEN -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE * (495.0 / 440.0)
-            Ahenk.YILDIZ -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE * (469.33 / 440.0)
-            Ahenk.SAH -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE * (391.11 / 440.0)
-            Ahenk.DAVUD -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE * (366.27 / 440.0)
+            Ahenk.KIZ -> if (usePhysicalMansur) Edo53Calculator.MANSUR_KABA_CARGAH_BASE * (9.0 / 8.0) else (440.0 * 16.0 / 27.0) * (9.0 / 8.0) // 1 Tanini tiz (+9 koma, 9/8 oranı)
+            Ahenk.SUPURDE -> ahenk.getKabaCargahBaseFrequency()
+            Ahenk.MUSTAHSEN -> ahenk.getKabaCargahBaseFrequency()
+            Ahenk.YILDIZ -> ahenk.getKabaCargahBaseFrequency()
+            Ahenk.SAH -> ahenk.getKabaCargahBaseFrequency()
+            Ahenk.DAVUD -> ahenk.getKabaCargahBaseFrequency()
         }
 
         val list = ArrayList<PerdeNote>(72)
@@ -121,7 +121,7 @@ object AeuScaleAtlas {
         val baseFreq = when (ahenk) {
             Ahenk.BOLAHENK -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE // 1760/9 Hz
             Ahenk.MANSUR -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE   // Mansur diyapazonda Dügâh 330 Hz referansı
-            Ahenk.KIZ -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE * (16.0 / 9.0) // Tam Dörtlü tiz (+22 koma, 4/3 oranı)
+            Ahenk.KIZ -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE * (9.0 / 8.0) // 1 Tanini tiz (+9 koma, 9/8 oranı)
             Ahenk.SUPURDE -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE * (523.2 / 440.0)
             Ahenk.MUSTAHSEN -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE * (495.0 / 440.0)
             Ahenk.YILDIZ -> Edo53Calculator.BOLAHENK_KABA_CARGAH_BASE * (469.33 / 440.0)
@@ -135,7 +135,9 @@ object AeuScaleAtlas {
         return when {
             makamName.contains("Rast", ignoreCase = true) ||
             makamName.contains("Nihavend", ignoreCase = true) ||
-            makamName.contains("Mahur", ignoreCase = true) -> {
+            makamName.contains("Mahur", ignoreCase = true) ||
+            makamName.contains("Suznak", ignoreCase = true) ||
+            makamName.contains("Sûz'nâk", ignoreCase = true) -> {
                 // Rast perdesi: Tam Beşli (3/2) ≈ 293.333 Hz, Güçlü: Nevâ (440.0 Hz, 3/2 beşli üstü)
                 MakamDroneTuning(
                     makamName = makamName,

@@ -188,10 +188,10 @@ object Edo53Calculator {
     }
 
     /**
-     * Kız ahenginde frekans üretir (Mansur'a göre Tam Dörtlü tiz, 4/3 oranı, +22 koma).
+     * Kız ahenginde frekans üretir (Mansur'a göre 1 Tanini tiz, 9/8 oranı, +9 koma).
      */
     fun toKizPitch(mutlakKoma: Int): Double {
-        return toMansurPitch(mutlakKoma) * (4.0 / 3.0)
+        return toMansurPitch(mutlakKoma) * (9.0 / 8.0)
     }
 
     /**

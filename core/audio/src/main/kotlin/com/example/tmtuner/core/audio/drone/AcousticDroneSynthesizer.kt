@@ -1,32 +1,55 @@
 package com.example.tmtuner.core.audio.drone
 
 import kotlin.math.PI
-import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
  * Türk Müziği Akustik Referans Sentezleyici (Drone / Dem Sesi) Sentez Motoru.
  *
  * Özellikler:
- * 1. **Kesintisiz Faz Birikimi (Phase Accumulation)**: Frekans değiştiğinde veya sürekli çalındığında
- *    asla faz sıfırlanmaz, klik ve patlama sesleri (pop/click) matematiksel olarak önlenir.
- * 2. **Harmonik Katkı Sentezi (Additive Harmonic Synthesis)**: Seçilen [AcousticDroneProfile]
- *    (Tanbûra, Ney veya Saf Sinüs) profiline göre doğal rezonans harmonikleri üretilir.
- * 3. **Çift Dem / Armonik Beşli (Dual Drone)**: Karar perdesi ile birlikte istenirse güçlü (Dominant 5'li)
- *    perdesi paralel olarak tınlatılabilir (Örn: Rast + Nevâ veya Dügâh + Nevâ).
- * 4. **Yumuşak Kazanç Geçişi (Gain Slew / Anti-Pop)**: Başlatma, durdurma ve ses seviyesi değişimlerinde
- *    yumuşak rampa interpolasyonu uygulanarak dijital sıçramalar engellenir.
- * 5. **Saf Matematiksel & Platform Bağımsız**: Android kütüphanelerine bağımlılığı yoktur, doğrudan
- *    birim test edilebilir.
+ * 1. **Kesintisiz Faz Birikimi (Phase Accumulation)**: Faz değişkenleri Double olarak tutulur
+ *    ve her ses örneğinde `phase = (phase + phaseStep) % (2.0 * Math.PI)` formülüyle modülo alınarak sarmalanır.
+ *    Uzun süreli çalımlarda kayan nokta hassasiyet kaybı ve faz yırtılmaları kesinlikle engellenir.
+ * 2. **50 ms Pürüzsüz Frekans Rampalama (Smoothing)**: Ani frekans/perde ve koma değişimlerinde
+ *    anlık frekanstan hedef frekansa 50 ms'lik lineer rampa uygulanarak klik/patlama (click/pop) sesleri engellenir.
+ * 3. **Harmonik Katkı Sentezi & Headroom Normalizasyonu**: Tanbûra ve Ney tını profillerinde
+ *    harmonik genliklerinin toplamı 0.85 katsayısına çekilerek DAC tavan kırpılmalarını önleyen -1.41 dB tavan boşluğu bırakılır.
+ * 4. **Güvenli PCM 16-bit Dönüşümü**: Dalga örnekleri `(sample * 32767.0).roundToInt().coerceIn(-32768, 32767).toShort()`
+ *    formülüyle Short dizisine dönüştürülür; yuvarlama hataları ve tavan kırpılmaları önlenir.
+ * 5. **Çift Dem / Armonik Beşli (Dual Drone)**: Karar perdesi ile birlikte istenirse güçlü (Dominant 5'li)
+ *    perdesi paralel olarak tınlatılabilir.
+ * 6. **Yumuşak Kazanç Geçişi (Gain Slew / Anti-Pop)**: Başlatma ve durdurmada yumuşak ses iniş/çıkış rampası uygulanır.
  *
- * @param sampleRate Örnekleme hızı (Hz), varsayılan 44100 Hz.
+ * @param sampleRate Örnekleme hızı (Hz), varsayılan 48000 Hz.
  */
 class AcousticDroneSynthesizer(
-    @Volatile var sampleRate: Int = 44100
+    @Volatile var sampleRate: Int = 48000
 ) {
-    // Akustik ayarlar
-    @Volatile var tonicFrequency: Double = 440.0
-    @Volatile var dominantFrequency: Double = 660.0
+    // Hedef ve anlık frekanslar (50 ms pürüzsüz rampa için)
+    private var currentTonicFrequency: Double = 440.0
+    private var targetTonicFrequency: Double = 440.0
+    private var tonicFreqStep: Double = 0.0
+    private var tonicRampRemainingSamples: Int = 0
+
+    private var currentDominantFrequency: Double = 660.0
+    private var targetDominantFrequency: Double = 660.0
+    private var dominantFreqStep: Double = 0.0
+    private var dominantRampRemainingSamples: Int = 0
+
+    // Geriye dönük uyumluluk property'leri
+    var tonicFrequency: Double
+        get() = targetTonicFrequency
+        set(value) {
+            setFrequencies(value, targetDominantFrequency)
+        }
+
+    var dominantFrequency: Double
+        get() = targetDominantFrequency
+        set(value) {
+            setFrequencies(targetTonicFrequency, value)
+        }
+
     @Volatile var isDualDroneEnabled: Boolean = false
     @Volatile var profile: AcousticDroneProfile = AcousticDroneProfile.TANBURA
 
@@ -38,22 +61,29 @@ class AcousticDroneSynthesizer(
     private var phaseTonic: Double = 0.0
     private var phaseDominant: Double = 0.0
 
-    // Kazanç yumuşatma hızı (Örnek başına adaptasyon: ~20-30 ms rampa)
-    private val gainSlewRate: Double = 1.0 / (sampleRate * 0.025)
+    // Kazanç yumuşatma hızı (Örnek başına adaptasyon: ~25 ms rampa)
+    private val gainSlewRate: Double
+        get() = 1.0 / (sampleRate * 0.025)
 
     /**
      * Hedef tonik (karar) ve opsiyonel güçlü (dominant) frekansını günceller.
-     * Faz sıfırlanmaz, ses kesintisiz olarak yeni frekansa kayar.
+     * Faz sıfırlanmaz, 50 ms'lik pürüzsüz lineer rampa ile hedef frekansa kayar.
      */
+    @Synchronized
     fun setFrequencies(tonicFreq: Double, dominantFreq: Double? = null) {
+        val rampSamples = (sampleRate * 0.050).toInt().coerceAtLeast(1)
+
         if (tonicFreq > 20.0) {
-            this.tonicFrequency = tonicFreq
+            targetTonicFrequency = tonicFreq
+            tonicFreqStep = (targetTonicFrequency - currentTonicFrequency) / rampSamples
+            tonicRampRemainingSamples = rampSamples
         }
-        if (dominantFreq != null && dominantFreq > 20.0) {
-            this.dominantFrequency = dominantFreq
-        } else {
-            // Varsayılan olarak 53-EDO / Pisagor Tam Beşli (3/2 = 1.5)
-            this.dominantFrequency = this.tonicFrequency * 1.5
+
+        val targetDom = dominantFreq ?: (if (tonicFreq > 20.0) tonicFreq * 1.5 else targetTonicFrequency * 1.5)
+        if (targetDom > 20.0) {
+            targetDominantFrequency = targetDom
+            dominantFreqStep = (targetDominantFrequency - currentDominantFrequency) / rampSamples
+            dominantRampRemainingSamples = rampSamples
         }
     }
 
@@ -65,29 +95,46 @@ class AcousticDroneSynthesizer(
      * @param length Üretilecek örnek sayısı.
      * @return Üretilen örnek sayısı.
      */
+    @Synchronized
     fun renderPcm16(buffer: ShortArray, offset: Int = 0, length: Int = buffer.size): Int {
         val targetGain = targetVolume.toDouble().coerceIn(0.0, 1.0)
         val profileWeights = profile.harmonicWeights
         val weightSum = profileWeights.sum()
-        val invWeightSum = if (weightSum > 0.0) 1.0 / weightSum else 1.0
 
-        val tonicFreq = tonicFrequency
-        val domFreq = dominantFrequency
+        // Tanbûr, Ney ve tüm profiller için harmonik genlik toplamını 0.85 tavan boşluğuna (headroom) ölçekle
+        val headroom = 0.85
+        val invWeightSum = if (weightSum > 0.0) headroom / weightSum else headroom
+
         val dual = isDualDroneEnabled
-
         val twoPi = 2.0 * Math.PI
-        val tonicIncrement = (twoPi * tonicFreq) / sampleRate
-        val domIncrement = (twoPi * domFreq) / sampleRate
 
         for (i in 0 until length) {
-            // Kazanç yumuşatma (Anti-pop)
+            // 0. Kazanç yumuşatma (Anti-pop)
+            val slew = gainSlewRate
             if (currentVolume < targetGain) {
-                currentVolume = (currentVolume + gainSlewRate).coerceAtMost(targetGain)
+                currentVolume = (currentVolume + slew).coerceAtMost(targetGain)
             } else if (currentVolume > targetGain) {
-                currentVolume = (currentVolume - gainSlewRate).coerceAtLeast(targetGain)
+                currentVolume = (currentVolume - slew).coerceAtLeast(targetGain)
             }
 
-            // 1. Tonik (Karar) dalga formu - Harmonik katkı sentezi (2*PI modüle açılar)
+            // 1. 50 ms Frekans Rampalama (Smoothing)
+            if (tonicRampRemainingSamples > 0) {
+                currentTonicFrequency += tonicFreqStep
+                tonicRampRemainingSamples--
+                if (tonicRampRemainingSamples == 0) {
+                    currentTonicFrequency = targetTonicFrequency
+                }
+            }
+
+            if (dominantRampRemainingSamples > 0) {
+                currentDominantFrequency += dominantFreqStep
+                dominantRampRemainingSamples--
+                if (dominantRampRemainingSamples == 0) {
+                    currentDominantFrequency = targetDominantFrequency
+                }
+            }
+
+            // 2. Tonik (Karar) dalga formu - Harmonik katkı sentezi
             var tonicSample = 0.0
             for (h in profileWeights.indices) {
                 val harmonicIndex = h + 1
@@ -96,7 +143,7 @@ class AcousticDroneSynthesizer(
             }
             tonicSample *= invWeightSum
 
-            // 2. Güçlü (Dominant) dalga formu (aktifse - 2*PI modüle açılar)
+            // 3. Güçlü (Dominant) dalga formu (aktifse)
             var finalSample = tonicSample
             if (dual) {
                 var domSample = 0.0
@@ -110,23 +157,17 @@ class AcousticDroneSynthesizer(
                 finalSample = 0.70 * tonicSample + 0.30 * domSample
             }
 
-            // 3. Genel kazanç uygulama ve 16-bit PCM ölçekleme (DAC distorsiyonunu önleyen -1.5 dB headroom)
-            val masterHeadroom = 0.85
-            val scaledSample = finalSample * currentVolume * (Short.MAX_VALUE * masterHeadroom)
-            val clampedSample = scaledSample.coerceIn(Short.MIN_VALUE.toDouble(), Short.MAX_VALUE.toDouble())
-            buffer[offset + i] = clampedSample.toInt().toShort()
+            // 4. PCM 16-bit Dönüşümü: Taşmaları ve tavan kırpılmalarını önleyen güvenli yuvarlama
+            val sample = finalSample * currentVolume
+            buffer[offset + i] = (sample * 32767.0).roundToInt().coerceIn(-32768, 32767).toShort()
 
-            // 4. Kesintisiz 2*PI Faz Normalizasyonu (Floating-point hassasiyet kaybını ve yırtılmaları önler)
-            phaseTonic += tonicIncrement
-            if (phaseTonic >= twoPi) {
-                phaseTonic %= twoPi
-            }
+            // 5. Faz Biriktirici & Sarmalama: phase = (phase + phaseStep) % (2.0 * Math.PI)
+            val tonicIncrement = (twoPi * currentTonicFrequency) / sampleRate
+            phaseTonic = (phaseTonic + tonicIncrement) % twoPi
 
             if (dual) {
-                phaseDominant += domIncrement
-                if (phaseDominant >= twoPi) {
-                    phaseDominant %= twoPi
-                }
+                val domIncrement = (twoPi * currentDominantFrequency) / sampleRate
+                phaseDominant = (phaseDominant + domIncrement) % twoPi
             }
         }
 
@@ -134,11 +175,16 @@ class AcousticDroneSynthesizer(
     }
 
     /**
-     * Sentezleyici fazını ve kazancını sıfırlar (Durdurulduğunda temiz başlangıç için).
+     * Sentezleyici fazını, frekans rampasını ve kazancını sıfırlar.
      */
+    @Synchronized
     fun resetPhase() {
         phaseTonic = 0.0
         phaseDominant = 0.0
         currentVolume = 0.0
+        currentTonicFrequency = targetTonicFrequency
+        tonicRampRemainingSamples = 0
+        currentDominantFrequency = targetDominantFrequency
+        dominantRampRemainingSamples = 0
     }
 }

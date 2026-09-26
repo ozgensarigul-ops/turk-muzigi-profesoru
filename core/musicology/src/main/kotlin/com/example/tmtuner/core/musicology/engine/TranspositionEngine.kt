@@ -47,14 +47,14 @@ object TranspositionEngine {
     /** Bolâhenk Âhengi Frekans Oranı (Mansur'a göre Tam Dörtlü pes) = 3/4 */
     const val BOLAHENK_RATIO_FROM_MANSUR: Double = 3.0 / 4.0
 
-    /** Kız Âhengi Dügâh Referansı = 440.0 * (4/3) ≈ 586.6667 Hz */
-    const val KIZ_DUGAH_HZ: Double = 440.0 * (4.0 / 3.0)
+    /** Kız Âhengi Dügâh Referansı (İsmail Hakkı Özkan s. 87: 1 Tanini tiz) = 440.0 * (9/8) = 495.0 Hz */
+    const val KIZ_DUGAH_HZ: Double = 440.0 * (9.0 / 8.0)
 
-    /** Kız Âhengi Koma Kayması (Mansur'a göre Tam Dörtlü tiz) = +22 koma */
-    const val KIZ_KOMA_FROM_MANSUR: Int = 22
+    /** Kız Âhengi Koma Kayması (Mansur'a göre 1 Tanini tiz) = +9 koma */
+    const val KIZ_KOMA_FROM_MANSUR: Int = 9
 
-    /** Kız Âhengi Frekans Oranı (Mansur'a göre Tam Dörtlü tiz) = 4/3 */
-    const val KIZ_RATIO_FROM_MANSUR: Double = 4.0 / 3.0
+    /** Kız Âhengi Frekans Oranı (Mansur'a göre 1 Tanini tiz) = 9/8 */
+    const val KIZ_RATIO_FROM_MANSUR: Double = 9.0 / 8.0
 
     /** Eb Alto Saksafon Yazılı -> Konsert Çarpanı (Büyük 6'lı pes: 16/27) */
     const val EB_ALTO_WRITTEN_TO_CONCERT_RATIO: Double = 16.0 / 27.0
@@ -209,6 +209,46 @@ object TranspositionEngine {
         instrument: TransposingInstrument
     ): Int {
         val shifted = komaIndex + instrument.komaOffsetFromConcert
+        return (shifted % 53 + 53) % 53
+    }
+
+    /**
+     * Canlı mikrofondan gelen icra frekansını (seçili ahenk),
+     * Türk Müziği yerindeki ana dizisine (Mansur referansı) dönüştürür.
+     *
+     * Özkan s. 87 kuralı: Kız Neyi (+9 koma tiz) icrası için frekans 9 koma
+     * PESTLEŞTİRİLİR (frekans * 8/9 veya frekans / (9/8)).
+     */
+    fun toConcertPitch(icraFrequency: Double, ahenk: Ahenk): Double {
+        if (icraFrequency <= 0.0 || ahenk == Ahenk.MANSUR) return icraFrequency
+        return transposeBetweenAhenks(icraFrequency, ahenk, Ahenk.MANSUR)
+    }
+
+    /**
+     * Yerindeki Mansur konsert frekansını seçili ahenk icra perdesi frekansına dönüştürür.
+     * Örneğin Mansur 440 Hz -> Kız Neyi icrasında 495 Hz tınlar (+9 koma tizleştirilir).
+     */
+    fun toIcraPitch(concertFrequency: Double, ahenk: Ahenk): Double {
+        if (concertFrequency <= 0.0 || ahenk == Ahenk.MANSUR) return concertFrequency
+        return transposeBetweenAhenks(concertFrequency, Ahenk.MANSUR, ahenk)
+    }
+
+    /**
+     * İcrâ ahengindeki 53-EDO koma indeksini (0..52), yerindeki konsert (Mansur) koma indeksine indirger.
+     * Özkan s. 87 Transpozisyon Yönü Kuralı:
+     * Kız Neyi (+9 koma tiz) icrası sisteme girerken 9 KOMA PESTLEŞTİRİLİR (icraKoma - 9).
+     * Bolâhenk (-22 koma pes) icrası sisteme girerken 22 KOMA TİZLEŞTİRİLİR (icraKoma - (-22) = +22).
+     */
+    fun transposeKomaToConcert(icraKoma: Int, ahenk: Ahenk): Int {
+        val shifted = icraKoma - ahenk.komaShiftFromMansur
+        return (shifted % 53 + 53) % 53
+    }
+
+    /**
+     * Yerindeki Mansur 53-EDO koma indeksini (0..52), seçili ahenk icra koma indeksine aktarır.
+     */
+    fun transposeKomaFromConcert(concertKoma: Int, ahenk: Ahenk): Int {
+        val shifted = concertKoma + ahenk.komaShiftFromMansur
         return (shifted % 53 + 53) % 53
     }
 }
